@@ -37,6 +37,14 @@ const RANGES = [
   { label: '30d', hours: 720 },
 ] as const
 
+type Tier = 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+const TIERS: Tier[] = ['CONSERVATIVE', 'BALANCED', 'DEGEN']
+const TIER_COLORS: Record<Tier, string> = {
+  CONSERVATIVE: '#00b8ff',
+  BALANCED: '#00D62B',
+  DEGEN: '#ff8c00',
+}
+
 interface Props {
   endpoint?: string
   title?: string
@@ -45,7 +53,15 @@ interface Props {
    * Optional tier to fetch the aggregated index line (weighted, chained across
    * rebalances) from /index/aggregate-history and overlay on the chart.
    */
-  aggregateTier?: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+  aggregateTier?: Tier
+  /**
+   * When true, render CONSERVATIVE/BALANCED/DEGEN filter buttons and drive
+   * both the per-token series and the aggregate index line from the selected
+   * tier — so users can compare indexes before depositing. Uses public
+   * /index/token-price-history endpoint regardless of `endpoint` prop.
+   */
+  tierSelectable?: boolean
+  initialTier?: Tier
 }
 
 export function TokenPriceChart({
@@ -53,16 +69,24 @@ export function TokenPriceChart({
   title = 'Index Token Performance',
   subtitle = 'Hourly prices · normalized to 100 at range start',
   aggregateTier,
+  tierSelectable = false,
+  initialTier = 'BALANCED',
 }: Props = {}) {
   const [hours, setHours] = useState<number>(168)
   const [hovered, setHovered] = useState<string | null>(null)
+  const [selectedTier, setSelectedTier] = useState<Tier>(initialTier)
+
+  const activeTier: Tier | undefined = tierSelectable ? selectedTier : aggregateTier
+  const tokenEndpoint = tierSelectable
+    ? `/index/token-price-history?tier=${selectedTier}&`
+    : `${endpoint}?`
 
   const q = useQuery({
-    queryKey: ['token-price-history', endpoint, hours],
+    queryKey: ['token-price-history', tokenEndpoint, hours],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}${endpoint}?hours=${hours}`, {
-        credentials: 'include',
-        headers: authHeaders(),
+      const res = await fetch(`${API_BASE}${tokenEndpoint}hours=${hours}`, {
+        credentials: tierSelectable ? 'omit' : 'include',
+        headers: tierSelectable ? {} : authHeaders(),
       })
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as { data: { tokens: TokenSeries[] } }
@@ -71,11 +95,11 @@ export function TokenPriceChart({
   })
 
   const aggQ = useQuery({
-    queryKey: ['index-aggregate-history', aggregateTier, hours],
-    enabled: !!aggregateTier,
+    queryKey: ['index-aggregate-history', activeTier, hours],
+    enabled: !!activeTier,
     queryFn: async () => {
       const res = await fetch(
-        `${API_BASE}/index/aggregate-history?tier=${aggregateTier}&hours=${hours}`,
+        `${API_BASE}/index/aggregate-history?tier=${activeTier}&hours=${hours}`,
       )
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {
@@ -122,7 +146,26 @@ export function TokenPriceChart({
           <h3 className="text-lg font-bold">{title}</h3>
           <p className="text-sm text-[var(--color-text-muted)]">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3 flex-wrap">
+          {tierSelectable && (
+            <div className="flex items-center gap-1">
+              {TIERS.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setSelectedTier(t)}
+                  className="rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors"
+                  style={
+                    selectedTier === t
+                      ? { backgroundColor: TIER_COLORS[t], color: '#000', borderColor: TIER_COLORS[t] }
+                      : { color: TIER_COLORS[t], borderColor: 'var(--color-border)' }
+                  }
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-1">
           {RANGES.map((r) => (
             <button
               key={r.label}
@@ -137,6 +180,7 @@ export function TokenPriceChart({
               {r.label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
@@ -198,7 +242,7 @@ export function TokenPriceChart({
                   onMouseLeave={() => setHovered(null)}
                 />
               ))}
-              {aggregateTier && aggPoints.length > 0 && (
+              {activeTier && aggPoints.length > 0 && (
                 <Line
                   type="monotone"
                   dataKey="__INDEX__"
@@ -220,7 +264,7 @@ export function TokenPriceChart({
       {hasData && (
         <div className="border-t border-[var(--color-border)] px-4 py-3">
           <div className="flex flex-wrap gap-2">
-            {aggregateTier && aggPoints.length > 0 && (
+            {activeTier && aggPoints.length > 0 && (
               <button
                 onMouseEnter={() => setHovered('__INDEX__')}
                 onMouseLeave={() => setHovered(null)}

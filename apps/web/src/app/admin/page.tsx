@@ -635,9 +635,10 @@ export default function AdminPage() {
                 />
 
                 <TokenPriceChart
-                  endpoint="/admin/vault-token-price-history"
-                  title="Vault Token Performance"
-                  subtitle="Per-token hourly prices · normalized to 100 at range start"
+                  tierSelectable
+                  initialTier={vault.data?.data?.subWallets[0]?.riskTier as 'CONSERVATIVE' | 'BALANCED' | 'DEGEN' | undefined}
+                  title="Compare Indexes (Vault)"
+                  subtitle="Top-10 token prices + weighted index line · switch tiers to compare before flipping vault"
                 />
 
                 <Panel title="Switch Vault Tier">

@@ -262,6 +262,80 @@ export async function indexInfoRoutes(app: FastifyInstance) {
   )
 
   /**
+   * GET /index/token-price-history?tier=BALANCED&hours=168
+   * Public per-token price series for the latest top-10 of a given tier,
+   * normalized to base 100 at the first sample. Lets visitors compare
+   * tier performance before depositing.
+   */
+  app.get<{ Querystring: { tier?: string; hours?: string } }>(
+    '/token-price-history',
+    async (req, reply) => {
+      try {
+        const tier = (req.query.tier ?? 'BALANCED').toUpperCase() as
+          | 'CONSERVATIVE'
+          | 'BALANCED'
+          | 'DEGEN'
+        if (!['CONSERVATIVE', 'BALANCED', 'DEGEN'].includes(tier)) {
+          return reply.status(400).send({ error: 'Invalid tier' })
+        }
+        const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+        // Latest completed cycle's top 10 for this tier
+        const cycle = await db.scoringCycle.findFirst({
+          where: { status: 'COMPLETED' },
+          orderBy: { completedAt: 'desc' },
+          include: {
+            scores: {
+              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+              orderBy: { rank: 'asc' },
+              select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+            },
+          },
+        })
+        if (!cycle || cycle.scores.length === 0) {
+          return { success: true, data: { tier, tokens: [], hours } }
+        }
+
+        const mints = cycle.scores.map((s) => s.tokenMint)
+        const metaByMint = new Map(cycle.scores.map((s) => [s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName }]))
+
+        const samples = await db.tokenPriceSnapshot.findMany({
+          where: { tokenMint: { in: mints }, createdAt: { gte: since } },
+          orderBy: { createdAt: 'asc' },
+          select: { tokenMint: true, priceSol: true, createdAt: true },
+        })
+        const byMint = new Map<string, typeof samples>()
+        for (const s of samples) {
+          const arr = byMint.get(s.tokenMint) ?? []
+          arr.push(s)
+          byMint.set(s.tokenMint, arr)
+        }
+
+        const tokens = mints.map((mint) => {
+          const series = byMint.get(mint) ?? []
+          const base = series.length > 0 ? Number(series[0].priceSol) : 0
+          return {
+            tokenMint: mint,
+            tokenSymbol: metaByMint.get(mint)?.symbol ?? null,
+            tokenName: metaByMint.get(mint)?.name ?? null,
+            points: series.map((p) => ({
+              t: p.createdAt,
+              priceSol: p.priceSol.toString(),
+              indexed: base > 0 ? (Number(p.priceSol) / base) * 100 : 100,
+            })),
+          }
+        })
+
+        return { success: true, data: { tier, tokens, hours } }
+      } catch (err) {
+        app.log.error(err, 'Failed to get tier token price history')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * GET /index/burns
    * Platform token burn stats and history.
    */

@@ -213,7 +213,7 @@ export default function DashboardPage() {
           transition={{ delay: 0.08 }}
           className="mb-8"
         >
-          <TokenPriceChart />
+          <TokenPriceChart tierSelectable title="Compare Indexes" subtitle="Top-10 token prices + weighted index line · switch tiers to compare" />
         </motion.div>
 
         {/* Pool PnL */}
