@@ -105,6 +105,15 @@ const TWEET_STATUS_COLOR: Record<string, string> = {
 }
 
 export default function AdminPage() {
+  // Gate the entire page on /auth/me → isAdmin. Until the check resolves we
+  // render nothing so non-admins never see the layout flash.
+  const me = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: () => fetchJson<{ data: { isAdmin?: boolean } }>('/auth/me'),
+    retry: false,
+    staleTime: 60_000,
+  })
+
   const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign'>('overview')
 
   const overview = useQuery({
@@ -168,6 +177,31 @@ export default function AdminPage() {
       fetch(`${API_BASE}/admin/trigger-rebalance`, { method: 'POST', headers: authHeaders(), credentials: 'include' }).then((r) => r.json()),
     onSuccess: () => overview.refetch(),
   })
+
+  // Hard gate: render nothing while we resolve identity, then show the
+  // forbidden screen if not admin. Prevents the admin layout from flashing
+  // for non-admin users.
+  if (me.isLoading) {
+    return <div className="min-h-screen bg-[var(--color-bg-primary)]" />
+  }
+  if (!me.data?.data?.isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <Shield className="mx-auto mb-4 h-12 w-12 text-[var(--color-text-muted)]" />
+          <h1 className="mb-2 text-2xl font-bold">Admin only</h1>
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            {me.isError
+              ? 'Sign in with an admin wallet to access this page.'
+              : 'Your wallet is not on the admin whitelist.'}
+          </p>
+          <Link href="/" className="btn-outline mt-6 inline-block px-5 py-2 text-sm">
+            Back to home
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   const isForbidden = (overview.error as Error)?.message === '403'
   const isUnauthorized = (overview.error as Error)?.message === '401'

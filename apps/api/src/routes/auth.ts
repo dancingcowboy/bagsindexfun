@@ -137,11 +137,20 @@ export async function authRoutes(app: FastifyInstance) {
       })
       if (!user) return reply.status(404).send({ error: 'User not found' })
 
+      const adminWallets = new Set(
+        (process.env.ADMIN_WALLETS || '')
+          .split(',')
+          .map((w) => w.trim())
+          .filter(Boolean),
+      )
+      const isAdmin = adminWallets.has(user.walletAddress)
+
       return {
         success: true,
         data: {
           id: user.id,
           walletAddress: user.walletAddress,
+          isAdmin,
           subWallets: user.subWallets.map((w) => ({ riskTier: w.riskTier, address: w.address })),
           createdAt: user.createdAt,
         },
