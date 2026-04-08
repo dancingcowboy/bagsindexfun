@@ -29,6 +29,7 @@ function formatTokens(n: bigint): string {
 interface BurnJobData {
   depositId?: string
   withdrawalId?: string
+  switchJobId?: string
   feeSol: string
 }
 
@@ -38,9 +39,13 @@ interface BurnJobData {
  * If buy fails (no liquidity), holds fee in escrow and retries next cycle.
  */
 async function processBurn(job: Job<BurnJobData>) {
-  const { depositId, withdrawalId, feeSol } = job.data
+  const { depositId, withdrawalId, switchJobId, feeSol } = job.data
   const logger = { info: console.log, error: console.error }
-  const source = depositId ? `deposit:${depositId}` : `withdrawal:${withdrawalId}`
+  const source = depositId
+    ? `deposit:${depositId}`
+    : withdrawalId
+      ? `withdrawal:${withdrawalId}`
+      : `switch:${switchJobId}`
   logger.info(`[burn] Processing burn for ${source} — fee: ${feeSol} SOL`)
 
   const platformTokenMint = process.env.PLATFORM_TOKEN_MINT
@@ -62,7 +67,9 @@ async function processBurn(job: Job<BurnJobData>) {
     ? await db.burnRecord.findUnique({ where: { depositId } })
     : withdrawalId
       ? await db.burnRecord.findUnique({ where: { withdrawalId } })
-      : null
+      : switchJobId
+        ? await db.burnRecord.findUnique({ where: { switchJobId } })
+        : null
   if (existing?.status === 'CONFIRMED') {
     logger.info(`[burn] ${source} already CONFIRMED (burn ${existing.id}) — skipping`)
     return
@@ -73,6 +80,7 @@ async function processBurn(job: Job<BurnJobData>) {
         data: {
           depositId: depositId ?? null,
           withdrawalId: withdrawalId ?? null,
+          switchJobId: switchJobId ?? null,
           platformTokenMint,
           tokensBought: 0n,
           tokensBurned: 0n,
@@ -166,7 +174,7 @@ async function processBurn(job: Job<BurnJobData>) {
           _sum: { tokensBurned: true },
         })
         const totalBurned = totalAgg._sum.tokensBurned ?? 0n
-        const action = depositId ? 'deposit' : 'withdrawal'
+        const action = depositId ? 'deposit' : withdrawalId ? 'withdrawal' : 'tier switch'
         const text =
           `🔥 Buyback & burn complete\n\n` +
           `Burned: ${formatTokens(tokensBought)} $BAGSX\n` +

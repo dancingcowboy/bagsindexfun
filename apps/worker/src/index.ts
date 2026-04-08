@@ -16,6 +16,7 @@ import { createBurnWorker } from './workers/burn.worker.js'
 import { createAnalysisWorker } from './workers/analysis.worker.js'
 import { createFeeClaimWorker } from './workers/fee-claim.worker.js'
 import { createPriceSnapshotWorker } from './workers/price-snapshot.worker.js'
+import { createSwitchWorker } from './workers/switch.worker.js'
 import { startTweetPoller, stopTweetPoller } from './workers/tweet-poller.js'
 
 console.log('[worker] Starting bags-index workers...')
@@ -29,6 +30,7 @@ const burnWorker = createBurnWorker()
 const analysisWorker = createAnalysisWorker()
 const feeClaimWorker = createFeeClaimWorker()
 const priceSnapshotWorker = createPriceSnapshotWorker()
+const switchWorker = createSwitchWorker()
 
 // Schedule daily scoring at 00:00 UTC
 const scoringQueue = new Queue(QUEUE_SCORING, { connection: redis })
@@ -82,6 +84,7 @@ const gracefulShutdown = async () => {
     analysisWorker.close(),
     feeClaimWorker.close(),
     priceSnapshotWorker.close(),
+    switchWorker.close(),
   ])
   await redis.quit()
   process.exit(0)

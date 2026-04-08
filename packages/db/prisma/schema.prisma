@@ -279,6 +279,7 @@ model BurnRecord {
   id                String      @id @default(cuid())
   depositId         String?     @unique @map("deposit_id")
   withdrawalId      String?     @unique @map("withdrawal_id")
+  switchJobId       String?     @unique @map("switch_job_id")
   platformTokenMint String      @map("platform_token_mint")
   tokensBought      BigInt      @map("tokens_bought")
   tokensBurned      BigInt      @map("tokens_burned")
@@ -290,8 +291,47 @@ model BurnRecord {
   createdAt         DateTime    @default(now()) @map("created_at")
   deposit           Deposit?    @relation(fields: [depositId], references: [id])
   withdrawal        Withdrawal? @relation(fields: [withdrawalId], references: [id])
+  switchJob         SwitchJob?  @relation(fields: [switchJobId], references: [id])
 
   @@map("burn_records")
+}
+
+// ─── Tier Switching ─────────────────────────────────────────────────────────
+
+/**
+ * A user-initiated atomic switch from one tier's sub-wallet to another's.
+ * Avoids the round-trip through the user's connected wallet (and the two
+ * separate deposit+withdrawal fees). Implements a smart-delta strategy:
+ * tokens present in BOTH the source holdings and the destination top-10
+ * are only partially sold (or fully kept) to the extent the destination
+ * target requires them, minimizing swap slippage and fees.
+ */
+model SwitchJob {
+  id                 String      @id @default(cuid())
+  userId             String      @map("user_id")
+  fromTier           RiskTier    @map("from_tier")
+  toTier             RiskTier    @map("to_tier")
+  /** Estimated SOL value of source holdings at time of switch */
+  sourceValueSol     Decimal     @map("source_value_sol") @db.Decimal(20, 9)
+  /** Flat switch fee in SOL (charged once, not per swap) */
+  feeSol             Decimal     @map("fee_sol") @db.Decimal(20, 9)
+  /** Count of overlap mints kept (fully or partially) from source */
+  overlapKept        Int         @default(0) @map("overlap_kept")
+  /** Count of sell swaps executed */
+  sellsExecuted      Int         @default(0) @map("sells_executed")
+  /** Count of buy swaps executed */
+  buysExecuted       Int         @default(0) @map("buys_executed")
+  /** Estimated SOL saved by smart-delta vs full liquidate+reallocate */
+  solSavedEstimate   Decimal     @default(0) @map("sol_saved_estimate") @db.Decimal(20, 9)
+  status             TxStatus    @default(PENDING)
+  errorMessage       String?     @map("error_message")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  completedAt        DateTime?   @map("completed_at")
+  burnRecord         BurnRecord?
+
+  @@index([userId])
+  @@index([status])
+  @@map("switch_jobs")
 }
 
 // ─── Admin ──────────────────────────────────────────────────────────────────

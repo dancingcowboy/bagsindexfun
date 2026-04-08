@@ -13,11 +13,13 @@ import {
   History,
   Flame,
   RefreshCw,
+  Shuffle,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
+import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 
 export default function DashboardPage() {
   const { authenticated, ready, logout, user } = usePrivy()
@@ -25,6 +27,7 @@ export default function DashboardPage() {
   const [showDeposit, setShowDeposit] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
   const [withdrawing, setWithdrawing] = useState(false)
+  const [showSwitch, setShowSwitch] = useState(false)
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
@@ -139,6 +142,14 @@ export default function DashboardPage() {
                 className="btn-primary flex items-center gap-2 text-sm"
               >
                 <ArrowDownToLine className="h-4 w-4" /> Deposit
+              </button>
+              <button
+                onClick={() => setShowSwitch(true)}
+                disabled={(pnlData?.data?.tiers ?? []).every((t: any) => parseFloat(t.currentValueSol ?? '0') <= 0)}
+                className="btn-outline flex items-center gap-2 text-sm disabled:opacity-40"
+                title="Move your position between indexes (1% flat fee)"
+              >
+                <Shuffle className="h-4 w-4" /> Switch Index
               </button>
               <button
                 onClick={handleWithdraw}
@@ -256,6 +267,16 @@ export default function DashboardPage() {
         )}
 
         {/* Deposit Modal */}
+        <SwitchIndexModal
+          open={showSwitch}
+          onClose={() => setShowSwitch(false)}
+          tiers={(pnlData?.data?.tiers ?? []).map((t: any) => ({
+            riskTier: t.riskTier,
+            totalValueSol: t.currentValueSol ?? '0',
+          }))}
+          onSwitched={() => refetchPortfolio()}
+        />
+
         {showDeposit && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <motion.div

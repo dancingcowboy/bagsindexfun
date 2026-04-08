@@ -6,6 +6,16 @@ export const DEPOSIT_FEE_BPS = 300
 /** Withdrawal fee in basis points (2%) */
 export const WITHDRAWAL_FEE_BPS = 200
 
+/**
+ * Flat fee (in basis points) charged when a user switches between tier
+ * indexes without round-tripping through their connected wallet. Cheaper
+ * than withdraw+deposit (which would cost 5% + 2× burn) because:
+ *   - single fee event instead of two
+ *   - no on-chain SOL transfer between user wallet and sub-wallets
+ *   - smart-delta: overlap tokens aren't sold then rebought
+ */
+export const SWITCH_FEE_BPS = 100
+
 /** Percentage of fee that goes to buy & burn — 100%, no staking pool */
 export const BURN_ALLOCATION_PCT = 100
 
@@ -159,6 +169,7 @@ export const QUEUE_BURN = 'burn'
 export const QUEUE_ANALYSIS = 'analysis'
 export const QUEUE_FEE_CLAIM = 'fee-claim'
 export const QUEUE_PRICE_SNAPSHOT = 'price-snapshot'
+export const QUEUE_SWITCH = 'switch'
 
 /** Wrapped SOL mint — reference for SOL-denominated valuation. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112'

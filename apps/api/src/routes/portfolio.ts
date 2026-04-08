@@ -1,7 +1,14 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { RISK_TIERS } from '@bags-index/shared'
+import {
+  RISK_TIERS,
+  createSwitchSchema,
+  SWITCH_FEE_BPS,
+  DEPOSIT_FEE_BPS,
+  WITHDRAWAL_FEE_BPS,
+} from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
+import { switchQueue } from '../queue/queues.js'
 
 export async function portfolioRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth)
@@ -56,6 +63,125 @@ export async function portfolioRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to get portfolio')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /portfolio/switch
+   * Atomically switch a user's position from one tier sub-wallet to another.
+   * Skips the on-chain round-trip through the connected wallet and charges a
+   * single flat fee (1%) instead of withdrawal+deposit (5% combined).
+   *
+   * Auth: requireAuth preHandler (registered on the router).
+   * Ownership: both source & dest sub-wallets are scoped to req.authUser.userId.
+   */
+  app.post('/switch', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const body = createSwitchSchema.parse(req.body)
+
+      const [srcWallet, dstWallet] = await Promise.all([
+        db.subWallet.findUnique({
+          where: { userId_riskTier: { userId, riskTier: body.fromTier } },
+          include: { holdings: true },
+        }),
+        db.subWallet.findUnique({
+          where: { userId_riskTier: { userId, riskTier: body.toTier } },
+        }),
+      ])
+      if (!srcWallet) {
+        return reply.status(404).send({ error: 'Source tier not found' })
+      }
+      if (!dstWallet) {
+        return reply.status(404).send({ error: 'Destination tier not found' })
+      }
+      if (srcWallet.holdings.length === 0) {
+        return reply.status(400).send({ error: 'Source tier has no holdings' })
+      }
+
+      const inflight = await db.switchJob.findFirst({
+        where: { userId, status: 'PENDING' },
+      })
+      if (inflight) {
+        return reply.status(409).send({ error: 'Switch already in progress' })
+      }
+
+      const sourceValueSol = srcWallet.holdings.reduce(
+        (s, h) => s + Number(h.valueSolEst),
+        0,
+      )
+      if (sourceValueSol <= 0) {
+        return reply.status(400).send({ error: 'Source value is zero' })
+      }
+      const feeSol = (sourceValueSol * SWITCH_FEE_BPS) / 10_000
+
+      const job = await db.switchJob.create({
+        data: {
+          userId,
+          fromTier: body.fromTier,
+          toTier: body.toTier,
+          sourceValueSol,
+          feeSol,
+          status: 'PENDING',
+        },
+      })
+
+      await switchQueue.add('switch', { switchJobId: job.id, userId })
+
+      const naiveFee =
+        sourceValueSol * ((WITHDRAWAL_FEE_BPS + DEPOSIT_FEE_BPS) / 10_000)
+
+      return {
+        success: true,
+        data: {
+          id: job.id,
+          fromTier: job.fromTier,
+          toTier: job.toTier,
+          sourceValueSol: sourceValueSol.toFixed(9),
+          feeSol: feeSol.toFixed(9),
+          naiveFeeSol: naiveFee.toFixed(9),
+          estimatedSavingsSol: Math.max(0, naiveFee - feeSol).toFixed(9),
+          status: job.status,
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to create switch job')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * GET /portfolio/switches
+   * List the authenticated user's switch history (ownership-scoped).
+   */
+  app.get('/switches', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const jobs = await db.switchJob.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      })
+      return {
+        success: true,
+        data: jobs.map((j) => ({
+          id: j.id,
+          fromTier: j.fromTier,
+          toTier: j.toTier,
+          sourceValueSol: Number(j.sourceValueSol).toFixed(9),
+          feeSol: Number(j.feeSol).toFixed(9),
+          overlapKept: j.overlapKept,
+          sellsExecuted: j.sellsExecuted,
+          buysExecuted: j.buysExecuted,
+          solSavedEstimate: Number(j.solSavedEstimate).toFixed(9),
+          status: j.status,
+          createdAt: j.createdAt,
+          completedAt: j.completedAt,
+        })),
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to list switches')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })

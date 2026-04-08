@@ -33,6 +33,17 @@ export const createWithdrawalSchema = z.object({
   amountSol: z.number().positive().optional(),
 })
 
+// ─── Tier Switch ─────────────────────────────────────────────────────────────
+
+export const createSwitchSchema = z
+  .object({
+    fromTier: riskTierSchema,
+    toTier: riskTierSchema,
+  })
+  .refine((v) => v.fromTier !== v.toTier, {
+    message: 'fromTier and toTier must differ',
+  })
+
 // ─── Projects (Bags App fee-share vaults) ───────────────────────────────────
 
 export const registerProjectVaultSchema = z.object({

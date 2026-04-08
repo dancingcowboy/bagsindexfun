@@ -68,6 +68,31 @@ class ApiClient {
     })
   }
 
+  createSwitch(
+    fromTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+    toTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+  ) {
+    return this.fetch<{
+      data: {
+        id: string
+        fromTier: string
+        toTier: string
+        sourceValueSol: string
+        feeSol: string
+        naiveFeeSol: string
+        estimatedSavingsSol: string
+        status: string
+      }
+    }>('/portfolio/switch', {
+      method: 'POST',
+      body: JSON.stringify({ fromTier, toTier }),
+    })
+  }
+
+  getSwitches() {
+    return this.fetch<{ data: any[] }>('/portfolio/switches')
+  }
+
   // Deposits
   createDeposit(amountSol: number) {
     return this.fetch<{ data: any }>('/deposits', {
