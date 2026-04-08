@@ -33,12 +33,20 @@ export async function postTweet(text: string, imageUrl?: string | null): Promise
   const c = client()
 
   if (imageUrl) {
-    // Fetch the image into a buffer
-    const res = await fetch(imageUrl)
-    if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`)
-    const buffer = Buffer.from(await res.arrayBuffer())
-    const contentType = res.headers.get('content-type') || 'image/jpeg'
-    const mimeType = contentType.split(';')[0].trim()
+    let buffer: Buffer
+    let mimeType: string
+    if (imageUrl.startsWith('data:')) {
+      const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(imageUrl)
+      if (!m) throw new Error('Invalid image data URL')
+      mimeType = m[1]
+      buffer = Buffer.from(m[2], 'base64')
+    } else {
+      const res = await fetch(imageUrl)
+      if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`)
+      buffer = Buffer.from(await res.arrayBuffer())
+      const contentType = res.headers.get('content-type') || 'image/jpeg'
+      mimeType = contentType.split(';')[0].trim()
+    }
 
     const mediaId = await c.v1.uploadMedia(buffer, { mimeType })
     const result = await c.v2.tweet({

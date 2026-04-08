@@ -719,6 +719,35 @@ function TweetCard({ tweet, index, onUpdated }: { tweet: Tweet; index: number; o
     }
   }
 
+  const uploadFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please choose an image file')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be ≤ 5 MB')
+      return
+    }
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(r.result as string)
+      r.onerror = () => reject(r.error)
+      r.readAsDataURL(file)
+    })
+    const res = await fetch(`${API_BASE}/admin/tweets/${tweet.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ imageUrl: dataUrl, imageAlt: file.name }),
+    })
+    if (!res.ok) {
+      alert('Upload failed')
+      return
+    }
+    setShowImagePicker(false)
+    onUpdated()
+  }
+
   const pickImage = async (url: string, alt: string) => {
     await fetch(`${API_BASE}/admin/tweets/${tweet.id}`, {
       method: 'PATCH',
@@ -847,6 +876,19 @@ function TweetCard({ tweet, index, onUpdated }: { tweet: Tweet; index: number; o
             <button onClick={searchUnsplash} disabled={searching} className="btn-outline px-3 py-1 text-xs">
               {searching ? '…' : 'Search'}
             </button>
+            <label className="btn-outline cursor-pointer px-3 py-1 text-xs">
+              Upload
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadFile(f)
+                  e.target.value = ''
+                }}
+              />
+            </label>
           </div>
           {searchResults.length > 0 && (
             <div className="grid grid-cols-4 gap-2">

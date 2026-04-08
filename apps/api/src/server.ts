@@ -23,6 +23,9 @@ const app = Fastify({
       ? { target: 'pino-pretty', options: { colorize: true } }
       : undefined,
   },
+  // 8 MB — tweet image uploads come in as base64 data URLs through the
+  // regular JSON PATCH /admin/tweets/:id endpoint.
+  bodyLimit: 8 * 1024 * 1024,
 })
 
 // ─── Plugins ─────────────────────────────────────────────────────────────────

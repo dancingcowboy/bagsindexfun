@@ -458,7 +458,22 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof body.text === 'string') data.text = body.text.slice(0, 280)
       if (typeof body.scheduledAt === 'string') data.scheduledAt = new Date(body.scheduledAt)
       if (typeof body.status === 'string') data.status = body.status
-      if (body.imageUrl !== undefined) data.imageUrl = body.imageUrl
+      if (body.imageUrl !== undefined) {
+        // Allow null (clear), https URLs, or data URLs for direct uploads.
+        // Data URLs must be image/png|jpeg|gif|webp and ≤ 5 MB decoded.
+        if (body.imageUrl !== null) {
+          const url = body.imageUrl
+          if (url.startsWith('data:')) {
+            const m = /^data:(image\/(png|jpeg|jpg|gif|webp));base64,([A-Za-z0-9+/=]+)$/.exec(url)
+            if (!m) return reply.status(400).send({ error: 'Invalid image data URL' })
+            const approxBytes = Math.floor((m[3].length * 3) / 4)
+            if (approxBytes > 5 * 1024 * 1024) return reply.status(413).send({ error: 'Image too large' })
+          } else if (!/^https:\/\//.test(url)) {
+            return reply.status(400).send({ error: 'imageUrl must be https or data URL' })
+          }
+        }
+        data.imageUrl = body.imageUrl
+      }
       if (body.imageAlt !== undefined) data.imageAlt = body.imageAlt
       const updated = await db.tweet.update({ where: { id }, data })
       return { success: true, data: updated }
