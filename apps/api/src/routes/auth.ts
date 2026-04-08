@@ -41,6 +41,7 @@ export async function authRoutes(app: FastifyInstance) {
           .filter(Boolean),
       )
       if (allowed.size > 0 && !allowed.has(walletAddress)) {
+        app.log.warn({ walletAddress, allowed: [...allowed] }, 'WALLET_NOT_ALLOWED')
         return reply.status(403).send({ error: 'WALLET_NOT_ALLOWED' })
       }
 
