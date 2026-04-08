@@ -4,6 +4,59 @@ An AI-powered, non-custodial index vault on Solana built for the [Bags](https://
 
 Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every deposit and withdrawal burns the platform token.
 
+---
+
+## Bags Hackathon Submission
+
+**One-liner:** Deposit SOL, get instant exposure to the top 10 performing tokens on Bags, rebalanced daily — fully non-custodial, with a deflationary burn flywheel on every flow and an autonomous Claude agent in the loop.
+
+**Categories:** Bags API · Fee Sharing · AI Agents · Claude Skills
+
+### Deep Bags integration
+
+bags-index isn't just *built on* Bags — it plugs into the Bags stack in three places at once:
+
+1. **Bags API for discovery** — token universe pulled live from `/token-launch/feed`, MIGRATED tokens only
+2. **Native Bags swaps** — every allocation, rebalance, and liquidation routes through `/trade/quote` + `/trade/swap`, signed by Privy and submitted on-chain
+3. **Bags fee sharing** — the protocol registers fee-share vaults on Bags tokens, auto-claims the creator fee split, and routes claimed SOL straight back into the index pipeline
+
+$BAGSX itself is a Bags-launched token, so the flywheel is fully native to the ecosystem.
+
+### Autonomous Claude agent
+
+On top of the quant ranking, an **autonomous Claude agent** reviews the candidate set every cycle — reading holder distribution, liquidity depth, recent price action, and on-chain signals to flag rug risk, sanity-check the top 10, and eject tokens that look compromised before they hit user vaults. The quant filter does the ranking; the agent adds a second layer of judgment that a pure formula can't. Every decision is logged for auditability.
+
+### The $BAGSX burn flywheel
+
+A flat rule applies to **every SOL flow** in the system:
+- **3% of every deposit** → buys back and burns $BAGSX
+- **2% of every withdrawal** → buys back and burns $BAGSX
+- **Auto-claimed Bags fee revenue** → flows through the same pipeline as a deposit into the protocol's own vault, so the 3% burn fires on protocol earnings too
+
+More usage → more burns → tighter supply. The token captures value from the vault's own activity.
+
+### Fair execution
+
+Rebalances use a seeded Fisher-Yates shuffle with historical weighting, so no wallet is consistently front-run or back-run. The shuffle seed is stored with every rebalance cycle for full auditability.
+
+### Non-custodial by design
+
+Every user gets a Privy Server Wallet as their vault sub-wallet. Transactions are signed by Privy's HSM via API — **zero private keys ever touch our database**. Users can withdraw on demand at any time. We hold custody of nothing.
+
+### Shipped & verifiable
+
+bags-index is live, not a prototype. The $BAGSX contract is deployed on Bags, the vault is a real Privy Server Wallet with a public address, every deposit, rebalance swap, fee claim, and burn is an on-chain transaction with a signature you can look up. The team wallet, the platform token, and the protocol vault are all publicly verifiable.
+
+### Why it matters for Bags
+
+bags-index turns Bags into an index-investable ecosystem. Instead of picking one token and hoping, users get diversified, rules-based exposure to whatever is actually working on Bags right now — quant-scored, AI-reviewed, and fairly executed — and every dollar that flows through the vault deflates $BAGSX. It's a passive product that makes the whole Bags launchpad more investable, and a flywheel that rewards every trade, deposit, and fee claim.
+
+### What's next — Bags App Store integration
+
+We'd love to turn bags-index into a standalone app for the **Bags App Store**, so any creator can plug an index vault directly into their own token's fee structure. The standalone version would be **fully configurable**: creators pick their own deposit and withdrawal fees, choose which token to buy back and burn (their own token, $BAGSX, SOL, or anything else), or turn the burn off entirely and route the fee wherever they want. The autonomous Claude agent and the non-custodial Privy architecture come along for the ride.
+
+---
+
 ## How It Works
 
 ### The Three Risk Tiers
