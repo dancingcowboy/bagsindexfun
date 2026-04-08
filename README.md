@@ -65,9 +65,9 @@ Each user gets **one sub-wallet per tier** — you can deposit into any combinat
 
 | Tier | Universe filter | Scoring weights | SOL anchor | Rebalance |
 |------|-----------------|------------------|------------|-----------|
-| **Conservative** | ≥ $250k liquidity, ≥ 500 holders, ≥ 14d old, vol₇d ≤ 0.6 | 0.25 vol · 0.25 growth · **0.50 liq** | **20% SOL** | every **24h** |
-| **Balanced** | ≥ $50k liquidity, ≥ 100 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 0% | every **12h** |
-| **Degen** | ≥ $20k liquidity, ≥ 50 holders, ≥ 1d old, **≤ 30d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 0% | every **4h** |
+| **Conservative** | ≥ $8k liquidity, ≥ 200 holders, ≥ 5d old, vol₇d ≤ 0.6 | 0.30 vol · 0.40 growth · **0.30 liq** | **20% SOL** | every **24h** |
+| **Balanced** | ≥ $10k liquidity, ≥ 150 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 0% | every **12h** |
+| **Degen** | ≥ $5k liquidity, ≥ 50 holders, **≤ 90d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 0% | every **4h** |
 
 A token can appear in more than one tier, but the filters and weights make each basket behave very differently: Conservative is "SOL + the boring winners", Degen is "fresh momentum with velocity."
 
