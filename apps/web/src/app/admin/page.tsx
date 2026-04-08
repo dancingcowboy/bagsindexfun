@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
@@ -105,14 +106,24 @@ const TWEET_STATUS_COLOR: Record<string, string> = {
 }
 
 export default function AdminPage() {
+  const router = useRouter()
   // Gate the entire page on /auth/me → isAdmin. Until the check resolves we
-  // render nothing so non-admins never see the layout flash.
+  // render nothing so non-admins never see the layout flash. If the user is
+  // not an admin (or not authenticated), bounce silently to the landing page —
+  // no "admin only" message, no invitation to poke.
   const me = useQuery({
     queryKey: ['auth-me'],
     queryFn: () => fetchJson<{ data: { isAdmin?: boolean } }>('/auth/me'),
     retry: false,
     staleTime: 60_000,
   })
+
+  useEffect(() => {
+    if (me.isLoading) return
+    if (me.isError || !me.data?.data?.isAdmin) {
+      router.replace('/')
+    }
+  }, [me.isLoading, me.isError, me.data, router])
 
   const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign'>('overview')
 
@@ -178,29 +189,10 @@ export default function AdminPage() {
     onSuccess: () => overview.refetch(),
   })
 
-  // Hard gate: render nothing while we resolve identity, then show the
-  // forbidden screen if not admin. Prevents the admin layout from flashing
-  // for non-admin users.
-  if (me.isLoading) {
+  // Hard gate: render nothing while we resolve identity OR while we're
+  // bouncing a non-admin away. Non-admins never see any admin chrome.
+  if (me.isLoading || !me.data?.data?.isAdmin) {
     return <div className="min-h-screen bg-[var(--color-bg-primary)]" />
-  }
-  if (!me.data?.data?.isAdmin) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <Shield className="mx-auto mb-4 h-12 w-12 text-[var(--color-text-muted)]" />
-          <h1 className="mb-2 text-2xl font-bold">Admin only</h1>
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            {me.isError
-              ? 'Sign in with an admin wallet to access this page.'
-              : 'Your wallet is not on the admin whitelist.'}
-          </p>
-          <Link href="/" className="btn-outline mt-6 inline-block px-5 py-2 text-sm">
-            Back to home
-          </Link>
-        </div>
-      </div>
-    )
   }
 
   const isForbidden = (overview.error as Error)?.message === '403'
