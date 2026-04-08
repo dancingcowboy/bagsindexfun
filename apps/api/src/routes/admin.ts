@@ -74,6 +74,108 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /admin/vault-twr-history?hours=168
+   *
+   * Time-weighted return for the protocol vault, indexed to 100 at the
+   * first snapshot in range. The vault is continuously funded by fee-claim
+   * deposits, so raw value goes up both when prices rise AND when new fees
+   * arrive — which makes raw value useless as a "performance" measure.
+   *
+   * TWR neutralizes that: for each consecutive pair of hourly PnlSnapshots
+   * (t_i → t_{i+1}), we subtract any cashflow C that arrived in the
+   * interval before computing the return:
+   *     step = (V_{i+1} - C) / V_i
+   * Then we chain: index_{i+1} = index_i * step. Cashflows are sourced
+   * from VAULT_FEE_CLAIM audit-log entries (the same canonical source the
+   * vault dashboard uses for "Recent Claims"), so manual seed deposits
+   * don't show up as phantom cashflows.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/vault-twr-history', async (req, reply) => {
+    try {
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: { select: { id: true } } },
+      })
+      if (!user || user.subWallets.length === 0) {
+        return { success: true, data: { points: [], hours } }
+      }
+
+      const subWalletIds = user.subWallets.map((w) => w.id)
+
+      // Snapshots — sum across sub-wallets per timestamp bucket (currently
+      // one sub-wallet, but tier flips create new rows over time).
+      const snapshots = await db.pnlSnapshot.findMany({
+        where: { subWalletId: { in: subWalletIds }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'asc' },
+        select: { totalValueSol: true, createdAt: true },
+      })
+      if (snapshots.length < 2) {
+        return { success: true, data: { points: [], hours } }
+      }
+
+      // Cashflows — only real fee claims (filter via audit log).
+      const claimLogs = await db.auditLog.findMany({
+        where: { action: 'VAULT_FEE_CLAIM', createdAt: { gte: since } },
+        select: { resource: true, createdAt: true },
+      })
+      const claimDepositIds = claimLogs
+        .map((l) => (l.resource ?? '').replace(/^deposit:/, ''))
+        .filter(Boolean)
+      const claimDeposits = claimDepositIds.length
+        ? await db.deposit.findMany({
+            where: { id: { in: claimDepositIds }, userId: user.id },
+            select: { amountSol: true, createdAt: true, confirmedAt: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        : []
+      const cashflows = claimDeposits.map((d) => ({
+        t: (d.confirmedAt ?? d.createdAt).getTime(),
+        amount: Number(d.amountSol),
+      }))
+
+      // Chain TWR. Snapshots already include the cashflow in totalValueSol,
+      // so subtract any flows that arrived in (prev, cur] before computing
+      // the return.
+      const points: { t: string; twr: number; valueSol: number }[] = []
+      let index = 100
+      points.push({
+        t: snapshots[0].createdAt.toISOString(),
+        twr: 100,
+        valueSol: Number(snapshots[0].totalValueSol),
+      })
+      for (let i = 1; i < snapshots.length; i++) {
+        const prev = snapshots[i - 1]
+        const cur = snapshots[i]
+        const v0 = Number(prev.totalValueSol)
+        const v1 = Number(cur.totalValueSol)
+        const lo = prev.createdAt.getTime()
+        const hi = cur.createdAt.getTime()
+        let cf = 0
+        for (const c of cashflows) {
+          if (c.t > lo && c.t <= hi) cf += c.amount
+        }
+        let step = 1
+        if (v0 > 0) {
+          const adj = v1 - cf
+          step = adj / v0
+          // Guard against negative/zero from rounding or stale snapshots
+          if (!isFinite(step) || step <= 0) step = 1
+        }
+        index *= step
+        points.push({ t: cur.createdAt.toISOString(), twr: index, valueSol: v1 })
+      }
+
+      return { success: true, data: { points, hours, cashflowCount: cashflows.length } }
+    } catch (err) {
+      app.log.error(err, 'Failed to compute vault TWR')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /admin/vault-token-price-history?hours=168
    * Per-token SOL price history for the protocol vault's current holdings.
    * Admin-gated. Mirrors the shape of /portfolio/token-price-history.

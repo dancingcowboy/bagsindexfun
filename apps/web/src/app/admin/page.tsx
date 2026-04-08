@@ -9,6 +9,7 @@ import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twit
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
+import { VaultTwrChart } from '@/components/VaultTwrChart'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -635,6 +636,8 @@ export default function AdminPage() {
                   title="Protocol Vault PnL"
                   subtitle="Hourly snapshots of the system vault — value in SOL per tier"
                 />
+
+                <VaultTwrChart />
 
                 <TokenPriceChart
                   tierSelectable
