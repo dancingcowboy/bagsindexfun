@@ -1,6 +1,13 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, buildBurnTransaction, submitAndConfirm } from '@bags-index/solana'
+import {
+  buildBuyTransaction,
+  buildBurnTransaction,
+  submitAndConfirmDirect,
+  signVersionedTxBase58,
+  getAtaBalance,
+  toBase58,
+} from '@bags-index/solana'
 import {
   QUEUE_BURN,
   BURN_ALLOCATION_PCT,
@@ -61,35 +68,67 @@ async function processBurn(job: Job<BurnJobData>) {
   })
 
   try {
-    // TODO: Use a dedicated burn wallet (Privy Server Wallet)
-    // For now, the burn wallet address comes from env
-    const burnWalletAddress = process.env.BURN_WALLET_ADDRESS
-    if (!burnWalletAddress) {
-      logger.info('[burn] BURN_WALLET_ADDRESS not configured — marking pending')
+    // The protocol vault is the buy-and-burn wallet — same Privy Server Wallet
+    // that claims Bags fees. No separate "burn wallet" exists on Solana; burns
+    // are SPL-token instructions signed by whoever holds the tokens.
+    const vaultAddress = process.env.VAULT_WALLET_ADDRESS
+    const vaultPrivyWalletId = process.env.VAULT_PRIVY_WALLET_ID
+    if (!vaultAddress || !vaultPrivyWalletId) {
+      logger.info('[burn] VAULT_WALLET_ADDRESS / VAULT_PRIVY_WALLET_ID not set — marking pending')
       return
     }
 
-    // Step 1: Buy platform token with fee SOL
+    // Snapshot ATA balance before buy — we burn only the delta we receive.
+    const balanceBefore = await getAtaBalance({
+      ownerPublicKey: vaultAddress,
+      tokenMint: platformTokenMint,
+    })
+
+    // Step 1: Buy platform token with fee SOL via Bags trade API
     const { txBytes: buyTxBytes, quote } = await buildBuyTransaction({
       tokenMint: platformTokenMint,
       solAmount: burnLamports,
-      userPublicKey: burnWalletAddress,
+      userPublicKey: vaultAddress,
     })
 
-    const tokensBought = BigInt(quote.outAmount)
+    const buySigned = await signVersionedTxBase58({
+      walletId: vaultPrivyWalletId,
+      base58Tx: toBase58(buyTxBytes),
+    })
+    const buySig = await submitAndConfirmDirect(buySigned)
+    logger.info(`[burn] Buy confirmed: ${buySig}`)
 
-    // TODO: Privy sign + submit the buy transaction
-    // const buySignature = await submitAndConfirm(signedBuyTx)
+    // Step 2: Read the ATA balance after swap to find the exact delta to burn
+    let balanceAfter = balanceBefore
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((r) => setTimeout(r, 2_000))
+      balanceAfter = await getAtaBalance({
+        ownerPublicKey: vaultAddress,
+        tokenMint: platformTokenMint,
+      })
+      if (balanceAfter > balanceBefore) break
+      logger.info(`[burn] Waiting for swap settlement (${attempt + 1}/6)…`)
+    }
 
-    // Step 2: Burn the tokens
+    const tokensBought = balanceAfter - balanceBefore
+    if (tokensBought <= 0n) {
+      logger.error(`[burn] Swap landed but no balance delta detected for ${source}`)
+      return
+    }
+    logger.info(`[burn] Received ${tokensBought} ${platformTokenMint.slice(0, 8)} from buy`)
+
+    // Step 3: Build + sign + submit the SPL burn instruction for the exact delta
     const burnTxBytes = await buildBurnTransaction({
-      ownerPublicKey: burnWalletAddress,
+      ownerPublicKey: vaultAddress,
       tokenMint: platformTokenMint,
       amount: tokensBought,
     })
-
-    // TODO: Privy sign + submit the burn transaction
-    // const burnSignature = await submitAndConfirm(signedBurnTx)
+    const burnSigned = await signVersionedTxBase58({
+      walletId: vaultPrivyWalletId,
+      base58Tx: toBase58(burnTxBytes),
+    })
+    const burnSig = await submitAndConfirmDirect(burnSigned)
+    logger.info(`[burn] Burn confirmed: ${burnSig}`)
 
     // Update record
     await db.burnRecord.update({
@@ -97,8 +136,8 @@ async function processBurn(job: Job<BurnJobData>) {
       data: {
         tokensBought,
         tokensBurned: tokensBought,
-        // buyTxSig: buySignature,
-        // burnTxSig: burnSignature,
+        buyTxSig: buySig,
+        burnTxSig: burnSig,
         status: 'CONFIRMED',
       },
     })

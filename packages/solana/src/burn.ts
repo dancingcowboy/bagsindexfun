@@ -11,6 +11,26 @@ import {
 import { getConnection } from './connection.js'
 
 /**
+ * Fetch the raw token balance (in base units) for a wallet's associated token
+ * account for a given mint. Returns 0n if the ATA doesn't exist yet.
+ */
+export async function getAtaBalance(params: {
+  ownerPublicKey: string
+  tokenMint: string
+}): Promise<bigint> {
+  const connection = getConnection()
+  const owner = new PublicKey(params.ownerPublicKey)
+  const mint = new PublicKey(params.tokenMint)
+  const ata = await getAssociatedTokenAddress(mint, owner)
+  try {
+    const bal = await connection.getTokenAccountBalance(ata, 'confirmed')
+    return BigInt(bal.value.amount)
+  } catch {
+    return 0n
+  }
+}
+
+/**
  * Build an SPL token burn transaction.
  * Returns unsigned transaction bytes for Privy signing.
  */
