@@ -56,6 +56,42 @@ export async function getTradeQuote(params: {
 }
 
 /**
+ * Valuation helper: ask Bags what `amountBaseUnits` of `tokenMint` would swap
+ * to in SOL right now. Returns lamports as a bigint, or `null` if Bags has no
+ * route (low-liquidity / just-launched / de-listed).
+ *
+ * Uses `/trade/quote` with outputMint = wrapped SOL. Does NOT need the token's
+ * decimals — the response's `outAmount` is already denominated in SOL
+ * lamports, so multiplying a holding's raw amount by "price per unit" is
+ * unnecessary. This is literally the liquidation value at current on-chain
+ * prices.
+ */
+const WSOL_MINT_INTERNAL = 'So11111111111111111111111111111111111111112'
+export async function getBagsSolValue(
+  tokenMint: string,
+  amountBaseUnits: string,
+): Promise<bigint | null> {
+  try {
+    const client = getClient()
+    const res = await client.get('/trade/quote', {
+      params: {
+        inputMint: tokenMint,
+        outputMint: WSOL_MINT_INTERNAL,
+        amount: amountBaseUnits,
+        slippageBps: 500,
+        slippageMode: 'manual',
+      },
+    })
+    const data = res.data?.response ?? res.data
+    const out = data?.outAmount ?? data?.quote?.outAmount
+    if (!out) return null
+    return BigInt(out)
+  } catch {
+    return null
+  }
+}
+
+/**
  * Get a signed swap transaction from Bags trade API.
  * Returns a base58-encoded VersionedTransaction ready for signing.
  */

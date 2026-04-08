@@ -2,6 +2,7 @@ export { getConnection } from './connection.js'
 export {
   getTokenFeed,
   getTradeQuote,
+  getBagsSolValue,
   getSwapTransaction,
   getBagsPools,
   getClaimablePositions,
