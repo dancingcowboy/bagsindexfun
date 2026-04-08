@@ -4,7 +4,21 @@ import { NextResponse, type NextRequest } from 'next/server'
  * Launch blackout — when SITE_HIDDEN=1 is set in the web env, every route
  * returns a black 404 page. Toggle off to reveal the site.
  */
-export function middleware(_req: NextRequest) {
+export function middleware(req: NextRequest) {
+  // Defense-in-depth: gate /dashboard and /admin behind the auth cookie.
+  // Without bags_jwt set by /auth/login (which enforces the wallet allowlist),
+  // bounce back to the landing page so non-allowlisted users can't poke around.
+  const { pathname } = req.nextUrl
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/admin')) {
+    const hasAuth = req.cookies.get('bags_jwt')?.value
+    if (!hasAuth) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/'
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
+  }
+
   if (process.env.SITE_HIDDEN !== '1') return NextResponse.next()
 
   const html = `<!doctype html>
