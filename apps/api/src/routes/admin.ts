@@ -34,7 +34,7 @@ export async function adminRoutes(app: FastifyInstance) {
       const scores = mints.size
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: [...mints] } },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { scoredAt: 'desc' },
             select: { tokenMint: true, tokenSymbol: true, tokenName: true },
           })
         : []
