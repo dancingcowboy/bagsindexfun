@@ -104,6 +104,27 @@ export async function processSnapshot(_job?: Job) {
   try {
     const uniqueMints = new Set<string>()
     for (const w of activeWallets) for (const h of w.holdings) uniqueMints.add(h.tokenMint)
+
+    // Also sample every token in the current top-10 per tier, regardless of
+    // whether any user holds them. This pre-populates the landing-page index
+    // chart with real data for tiers with no live users yet.
+    const latestCycle = await db.scoringCycle.findFirst({
+      where: { status: 'COMPLETED' },
+      orderBy: { completedAt: 'desc' },
+      select: { id: true },
+    })
+    if (latestCycle) {
+      const topScores = await db.tokenScore.findMany({
+        where: {
+          cycleId: latestCycle.id,
+          isBlacklisted: false,
+          rank: { lte: 10 },
+        },
+        select: { tokenMint: true },
+      })
+      for (const s of topScores) uniqueMints.add(s.tokenMint)
+    }
+
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {
       const decimals = await getMintDecimalsBatch(mintList)
