@@ -28,6 +28,21 @@ export async function adminRoutes(app: FastifyInstance) {
       })
       if (!user) return { success: true, data: null }
 
+      // Resolve symbol/name per mint from the most recent TokenScore row.
+      const mints = new Set<string>()
+      for (const w of user.subWallets) for (const h of w.holdings) mints.add(h.tokenMint)
+      const scores = mints.size
+        ? await db.tokenScore.findMany({
+            where: { tokenMint: { in: [...mints] } },
+            orderBy: { createdAt: 'desc' },
+            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+          })
+        : []
+      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      for (const s of scores) {
+        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+      }
+
       const totalValueSol = user.subWallets.reduce(
         (sum, w) => sum + w.holdings.reduce((h, x) => h + Number(x.valueSolEst || 0), 0),
         0,
@@ -42,11 +57,16 @@ export async function adminRoutes(app: FastifyInstance) {
           subWallets: user.subWallets.map((w) => ({
             riskTier: w.riskTier,
             address: w.address,
-            holdings: w.holdings.map((h) => ({
-              tokenMint: h.tokenMint,
-              amount: h.amount.toString(),
-              valueSolEst: h.valueSolEst?.toString() ?? '0',
-            })),
+            holdings: w.holdings.map((h) => {
+              const meta = metaByMint.get(h.tokenMint)
+              return {
+                tokenMint: h.tokenMint,
+                tokenSymbol: meta?.symbol ?? null,
+                tokenName: meta?.name ?? null,
+                amount: h.amount.toString(),
+                valueSolEst: h.valueSolEst?.toString() ?? '0',
+              }
+            }),
           })),
           totals: {
             totalValueSol: totalValueSol.toFixed(6),

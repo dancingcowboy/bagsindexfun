@@ -104,7 +104,7 @@ interface VaultData {
   subWallets: {
     riskTier: string
     address: string
-    holdings: { tokenMint: string; amount: string; valueSolEst: string }[]
+    holdings: { tokenMint: string; tokenSymbol: string | null; tokenName: string | null; amount: string; valueSolEst: string }[]
   }[]
   totals: {
     totalValueSol: string
@@ -650,7 +650,10 @@ export default function AdminPage() {
                             <tbody>
                               {w.holdings.map((h) => (
                                 <tr key={h.tokenMint} className="border-t border-[var(--color-border-subtle)]">
-                                  <td className="py-1 font-mono">{h.tokenMint.slice(0, 8)}…{h.tokenMint.slice(-4)}</td>
+                                  <td className="py-1">
+                                    <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
+                                    <div className="font-mono text-[10px] text-[var(--color-text-muted)]">{h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}</div>
+                                  </td>
                                   <td className="py-1 text-right">{h.amount}</td>
                                   <td className="py-1 text-right">{Number(h.valueSolEst).toFixed(4)}</td>
                                 </tr>
