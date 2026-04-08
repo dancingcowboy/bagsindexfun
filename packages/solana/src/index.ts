@@ -17,4 +17,5 @@ export { getHolderCount, getTokenMetadata, getTokenMetadataBatch, getTokenBalanc
 export { buildBuyTransaction, buildSellTransaction, submitAndConfirm, submitAndConfirmDirect, capInputToLiquidity } from './swap.js'
 export { buildBurnTransaction, getAtaBalance, getMintDecimalsBatch } from './burn.js'
 export { toBase58 } from './util.js'
-export { getPrivy, createSolanaServerWallet, signVersionedTxBase58 } from './privy.js'
+export { getPrivy, createSolanaServerWallet, signVersionedTxBase58, signVersionedTxBytes } from './privy.js'
+export { transferSolFromServerWallet } from './transfer.js'

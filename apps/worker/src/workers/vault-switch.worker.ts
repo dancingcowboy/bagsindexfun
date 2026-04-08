@@ -1,6 +1,12 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, buildSellTransaction, capInputToLiquidity } from '@bags-index/solana'
+import {
+  buildBuyTransaction,
+  buildSellTransaction,
+  capInputToLiquidity,
+  signVersionedTxBytes,
+  submitAndConfirmDirect,
+} from '@bags-index/solana'
 import {
   QUEUE_VAULT_SWITCH,
   TOP_N_TOKENS,
@@ -189,11 +195,16 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
   for (const plan of sellPlans) {
     if (plan.sellAmount <= 0n) continue
     try {
-      const { txBytes: _tx, quote } = await buildSellTransaction({
+      const { txBytes, quote } = await buildSellTransaction({
         tokenMint: plan.mint,
         tokenAmount: plan.sellAmount,
         userPublicKey: vault.address,
       })
+      const signed = await signVersionedTxBytes({
+        walletId: vault.privyWalletId,
+        txBytes,
+      })
+      const sig = await submitAndConfirmDirect(signed)
       const solOutLamports = BigInt(quote.outAmount)
       poolLamports += solOutLamports
 
@@ -205,7 +216,8 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
           inputAmount: plan.sellAmount,
           outputAmount: solOutLamports < 0n ? 0n : solOutLamports,
           slippageBps: quote.slippageBps,
-          status: 'PENDING',
+          status: 'CONFIRMED',
+          txSignature: sig,
         },
       })
 
@@ -270,11 +282,16 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
     const capped = await capInputToLiquidity(plan.mint, scaled)
     const solForToken = Number(capped) / LAMPORTS_PER_SOL
     try {
-      const { txBytes: _tx, quote } = await buildBuyTransaction({
+      const { txBytes, quote } = await buildBuyTransaction({
         tokenMint: plan.mint,
         solAmount: capped,
         userPublicKey: vault.address,
       })
+      const signed = await signVersionedTxBytes({
+        walletId: vault.privyWalletId,
+        txBytes,
+      })
+      const sig = await submitAndConfirmDirect(signed)
 
       await db.swapExecution.create({
         data: {
@@ -284,7 +301,8 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
           inputAmount: capped,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
-          status: 'PENDING',
+          status: 'CONFIRMED',
+          txSignature: sig,
         },
       })
 

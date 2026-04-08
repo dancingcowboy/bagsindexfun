@@ -1,7 +1,13 @@
 import { Worker, type Job } from 'bullmq'
 import crypto from 'node:crypto'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, buildSellTransaction, capInputToLiquidity } from '@bags-index/solana'
+import {
+  buildBuyTransaction,
+  buildSellTransaction,
+  capInputToLiquidity,
+  signVersionedTxBytes,
+  submitAndConfirmDirect,
+} from '@bags-index/solana'
 import {
   QUEUE_REBALANCE,
   TOP_N_TOKENS,
@@ -197,7 +203,11 @@ async function processRebalance(job: Job<RebalanceJobData>) {
                 data: { realizedPnlSol: { increment: realized } },
               })
 
-              // TODO: Privy sign + submit
+              const signed = await signVersionedTxBytes({
+                walletId: wallet.privyWalletId,
+                txBytes,
+              })
+              const sig = await submitAndConfirmDirect(signed)
               await db.swapExecution.create({
                 data: {
                   rebalanceCycleId: rebalanceCycle.id,
@@ -207,7 +217,8 @@ async function processRebalance(job: Job<RebalanceJobData>) {
                   inputAmount: tokensToSell,
                   outputAmount: BigInt(quote.outAmount),
                   slippageBps: quote.slippageBps,
-                  status: 'PENDING',
+                  status: 'CONFIRMED',
+                  txSignature: sig,
                 },
               })
             } catch (err) {
@@ -258,7 +269,11 @@ async function processRebalance(job: Job<RebalanceJobData>) {
                 },
               })
 
-              // TODO: Privy sign + submit
+              const signed = await signVersionedTxBytes({
+                walletId: wallet.privyWalletId,
+                txBytes,
+              })
+              const sig = await submitAndConfirmDirect(signed)
               await db.swapExecution.create({
                 data: {
                   rebalanceCycleId: rebalanceCycle.id,
@@ -268,7 +283,8 @@ async function processRebalance(job: Job<RebalanceJobData>) {
                   inputAmount: buyLamports,
                   outputAmount: BigInt(quote.outAmount),
                   slippageBps: quote.slippageBps,
-                  status: 'PENDING',
+                  status: 'CONFIRMED',
+                  txSignature: sig,
                 },
               })
             } catch (err) {

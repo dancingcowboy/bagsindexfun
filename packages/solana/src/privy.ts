@@ -36,9 +36,21 @@ export async function signVersionedTxBase58(params: {
   walletId: string
   base58Tx: string
 }): Promise<Uint8Array> {
+  return signVersionedTxBytes({
+    walletId: params.walletId,
+    txBytes: bs58.decode(params.base58Tx),
+  })
+}
+
+/**
+ * Sign raw VersionedTransaction bytes with a Privy server wallet.
+ */
+export async function signVersionedTxBytes(params: {
+  walletId: string
+  txBytes: Uint8Array
+}): Promise<Uint8Array> {
   const privy = getPrivy()
-  const txBytes = bs58.decode(params.base58Tx)
-  const tx = VersionedTransaction.deserialize(txBytes)
+  const tx = VersionedTransaction.deserialize(params.txBytes)
   const res = await privy.walletApi.solana.signTransaction({
     walletId: params.walletId,
     transaction: tx,

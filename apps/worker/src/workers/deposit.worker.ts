@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, submitAndConfirm, capInputToLiquidity } from '@bags-index/solana'
+import { buildBuyTransaction, submitAndConfirmDirect, capInputToLiquidity, signVersionedTxBytes } from '@bags-index/solana'
 import {
   QUEUE_DEPOSIT,
   TOP_N_TOKENS,
@@ -95,11 +95,13 @@ async function processDeposit(job: Job<DepositJobData>) {
         userPublicKey: subWallet.address,
       })
 
-      // TODO: Sign via Privy Server Wallet API
-      // const signedTx = await privySign(subWallet.privyWalletId, txBytes)
-      // const sig = await submitAndConfirm(signedTx)
+      // Sign with the sub-wallet's Privy server wallet and submit on-chain.
+      const signed = await signVersionedTxBytes({
+        walletId: subWallet.privyWalletId,
+        txBytes,
+      })
+      const sig = await submitAndConfirmDirect(signed)
 
-      // Record execution (pending actual signing)
       await db.swapExecution.create({
         data: {
           subWalletId: subWallet.id,
@@ -108,7 +110,8 @@ async function processDeposit(job: Job<DepositJobData>) {
           inputAmount: lamports,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
-          status: 'PENDING', // Will be CONFIRMED after Privy signing is integrated
+          status: 'CONFIRMED',
+          txSignature: sig,
         },
       })
 

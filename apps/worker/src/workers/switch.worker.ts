@@ -1,6 +1,13 @@
 import { Worker, type Job, Queue } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, buildSellTransaction, capInputToLiquidity } from '@bags-index/solana'
+import {
+  buildBuyTransaction,
+  buildSellTransaction,
+  capInputToLiquidity,
+  signVersionedTxBytes,
+  submitAndConfirmDirect,
+  transferSolFromServerWallet,
+} from '@bags-index/solana'
 import {
   QUEUE_SWITCH,
   QUEUE_BURN,
@@ -198,15 +205,17 @@ async function processSwitch(job: Job<SwitchJobData>) {
     for (const plan of sellPlans) {
       if (plan.sellAmount <= 0n) continue
       try {
-        const { txBytes: _tx, quote } = await buildSellTransaction({
+        const { txBytes, quote } = await buildSellTransaction({
           tokenMint: plan.mint,
           tokenAmount: plan.sellAmount,
           userPublicKey: srcWallet.address,
         })
 
-        // TODO: Privy signing + submit — matches deposit/withdrawal stub state
-        // const signed = await signVersionedTxBase58({ walletId: srcWallet.privyWalletId, base58Tx: toBase58(_tx) })
-        // const sig = await submitAndConfirm(signed)
+        const signed = await signVersionedTxBytes({
+          walletId: srcWallet.privyWalletId,
+          txBytes,
+        })
+        const sig = await submitAndConfirmDirect(signed)
 
         const solOutLamports = BigInt(quote.outAmount)
         poolLamports += solOutLamports
@@ -219,7 +228,8 @@ async function processSwitch(job: Job<SwitchJobData>) {
             inputAmount: plan.sellAmount,
             outputAmount: soloutGuard(solOutLamports),
             slippageBps: quote.slippageBps,
-            status: 'PENDING',
+            status: 'CONFIRMED',
+            txSignature: sig,
           },
         })
 
@@ -331,6 +341,23 @@ async function processSwitch(job: Job<SwitchJobData>) {
       if (lamports > 0n) buyPlans.push({ mint: score.tokenMint, solLamports: lamports })
     }
 
+    // Bridge: physically move the recovered SOL pool from src → dst sub-wallet
+    // so the dst wallet can pay for the buys. Leave a small reserve for gas.
+    if (poolLamports > 0n) {
+      try {
+        const bridgeSig = await transferSolFromServerWallet({
+          fromPrivyWalletId: srcWallet.privyWalletId,
+          fromAddress: srcWallet.address,
+          toAddress: dstWallet.address,
+          lamports: poolLamports,
+        })
+        logger.info(`[switch] Bridged ${poolLamports} lamports src→dst: ${bridgeSig}`)
+      } catch (err) {
+        logger.error(`[switch] SOL bridge failed: ${err}`)
+        throw err
+      }
+    }
+
     // Scale buy plans to the actual recovered pool (sells may have slipped).
     const desiredBuySum = buyPlans.reduce((s, b) => s + b.solLamports, 0n)
     let scaleNum = 1
@@ -349,11 +376,17 @@ async function processSwitch(job: Job<SwitchJobData>) {
       const capped = await capInputToLiquidity(plan.mint, scaled)
       const solForToken = Number(capped) / LAMPORTS_PER_SOL
       try {
-        const { txBytes: _tx, quote } = await buildBuyTransaction({
+        const { txBytes, quote } = await buildBuyTransaction({
           tokenMint: plan.mint,
           solAmount: capped,
           userPublicKey: dstWallet.address,
         })
+
+        const signed = await signVersionedTxBytes({
+          walletId: dstWallet.privyWalletId,
+          txBytes,
+        })
+        const sig = await submitAndConfirmDirect(signed)
 
         await db.swapExecution.create({
           data: {
@@ -363,7 +396,8 @@ async function processSwitch(job: Job<SwitchJobData>) {
             inputAmount: capped,
             outputAmount: BigInt(quote.outAmount),
             slippageBps: quote.slippageBps,
-            status: 'PENDING',
+            status: 'CONFIRMED',
+            txSignature: sig,
           },
         })
 

@@ -1,7 +1,18 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildSellTransaction, submitAndConfirm } from '@bags-index/solana'
-import { QUEUE_WITHDRAWAL, QUEUE_BURN, SOL_MINT, LAMPORTS_PER_SOL } from '@bags-index/shared'
+import {
+  buildSellTransaction,
+  submitAndConfirmDirect,
+  signVersionedTxBytes,
+  transferSolFromServerWallet,
+} from '@bags-index/solana'
+import {
+  QUEUE_WITHDRAWAL,
+  QUEUE_BURN,
+  SOL_MINT,
+  LAMPORTS_PER_SOL,
+  WALLET_RESERVE_SOL,
+} from '@bags-index/shared'
 import { Queue } from 'bullmq'
 import { redis } from '../queue/redis.js'
 
@@ -47,9 +58,11 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
         userPublicKey: subWallet.address,
       })
 
-      // TODO: Sign via Privy Server Wallet API
-      // const signedTx = await privySign(subWallet.privyWalletId, txBytes)
-      // const sig = await submitAndConfirm(signedTx)
+      const signed = await signVersionedTxBytes({
+        walletId: subWallet.privyWalletId,
+        txBytes,
+      })
+      const sig = await submitAndConfirmDirect(signed)
 
       totalRecoveredLamports += BigInt(quote.outAmount)
 
@@ -71,7 +84,8 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
           inputAmount: holding.amount,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
-          status: 'PENDING',
+          status: 'CONFIRMED',
+          txSignature: sig,
         },
       })
 
@@ -102,8 +116,33 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     },
   })
 
-  // TODO: Transfer recovered SOL to user's connected wallet
-  // const transferSig = await transferSol(subWallet, user.walletAddress, netAmount)
+  // Transfer recovered SOL (minus protocol fee and gas reserve) to the user's
+  // connected wallet. The fee stays on the sub-wallet for the burn worker to
+  // pick up; gas reserve stays so the wallet can pay future tx fees.
+  let transferSig: string | null = null
+  try {
+    const user = await db.user.findUnique({ where: { id: userId } })
+    if (!user) throw new Error(`User ${userId} not found`)
+    const feeLamports = BigInt(Math.floor(Number(withdrawal.feeSol) * LAMPORTS_PER_SOL))
+    const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
+    const sendable = totalRecoveredLamports - feeLamports - reserveLamports
+    if (sendable > 0n) {
+      transferSig = await transferSolFromServerWallet({
+        fromPrivyWalletId: subWallet.privyWalletId,
+        fromAddress: subWallet.address,
+        toAddress: user.walletAddress,
+        lamports: sendable,
+      })
+      logger.info(`[withdrawal] Sent ${sendable} lamports to ${user.walletAddress}: ${transferSig}`)
+      await db.withdrawal.update({
+        where: { id: withdrawalId },
+        data: { txSignature: transferSig },
+      })
+    }
+  } catch (err) {
+    logger.error(`[withdrawal] SOL transfer to user failed: ${err}`)
+    failedTokens++
+  }
 
   // Enqueue burn for the fee
   await burnQueue.add('burn-withdrawal-fee', {
