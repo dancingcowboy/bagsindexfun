@@ -4,7 +4,7 @@ import {
   getClaimablePositions,
   buildClaimFeeTransactions,
   signVersionedTxBase58,
-  submitAndConfirm,
+  submitAndConfirmDirect,
 } from '@bags-index/solana'
 import {
   QUEUE_FEE_CLAIM,
@@ -111,7 +111,7 @@ async function processFeeClaim(_job: Job) {
           walletId: vaultPrivyWalletId,
           base58Tx: tx.tx,
         })
-        const sig = await submitAndConfirm(signedBytes)
+        const sig = await submitAndConfirmDirect(signedBytes)
         logger.info(
           `[fee-claim] Submitted claim tx for ${pos.baseMint.slice(0, 8)}: ${sig}`,
         )

@@ -83,6 +83,22 @@ export async function submitAndConfirm(signedTxBytes: Uint8Array): Promise<strin
 }
 
 /**
+ * Submit a signed transaction via the plain Solana RPC (no Jito tip required).
+ * Use for transactions where MEV protection is unnecessary — e.g. Bags fee
+ * claim txs, which don't include a tip instruction and are rejected by
+ * Helius Sender for that reason.
+ */
+export async function submitAndConfirmDirect(signedTxBytes: Uint8Array): Promise<string> {
+  const connection = getConnection()
+  const signature = await connection.sendRawTransaction(signedTxBytes, {
+    skipPreflight: false,
+    maxRetries: 3,
+  })
+  await connection.confirmTransaction(signature, 'confirmed')
+  return signature
+}
+
+/**
  * Cap a desired SOL input to no more than MAX_LIQUIDITY_PCT (default 2%) of the
  * token's available SOL-side liquidity. Returns the capped lamport amount.
  *
