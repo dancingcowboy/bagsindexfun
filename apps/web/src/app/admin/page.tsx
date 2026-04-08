@@ -99,6 +99,28 @@ interface Tweet {
   errorMessage: string | null
 }
 
+interface VaultData {
+  walletAddress: string
+  subWallets: {
+    riskTier: string
+    address: string
+    holdings: { tokenMint: string; amount: string; valueSolEst: string }[]
+  }[]
+  totals: {
+    totalValueSol: string
+    totalClaimedSol: string
+    totalBurnedSol: string
+    claimCount: number
+  }
+  recentClaims: {
+    id: string
+    amountSol: string
+    feeSol: string
+    createdAt: string
+    status: string
+  }[]
+}
+
 const TWEET_STATUS_COLOR: Record<string, string> = {
   DRAFT: '#888',
   ACTIVE: '#00D62B',
@@ -138,7 +160,14 @@ export default function AdminPage() {
     }
   }, [privyReady, privyAuth, me.isLoading, me.isFetching, me.isError, me.data, router])
 
-  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign'>('overview')
+  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault'>('overview')
+
+  const vault = useQuery({
+    queryKey: ['admin-vault'],
+    queryFn: () => fetchJson<{ data: VaultData | null }>('/admin/vault'),
+    enabled: tab === 'vault',
+    refetchInterval: tab === 'vault' ? 20_000 : false,
+  })
 
   const overview = useQuery({
     queryKey: ['admin-overview'],
@@ -251,7 +280,7 @@ export default function AdminPage() {
       <main className="mx-auto max-w-7xl px-6 pt-24 pb-24">
         {/* Tabs */}
         <div className="mb-8 flex items-center gap-2 border-b border-[var(--color-border)]">
-          {(['overview', 'users', 'pnl', 'audit', 'campaign'] as const).map((t) => (
+          {(['overview', 'users', 'pnl', 'audit', 'campaign', 'vault'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -576,6 +605,84 @@ export default function AdminPage() {
             prefilling={prefillImages.isPending}
             refetch={() => queryClient.invalidateQueries({ queryKey: ['admin-tweets'] })}
           />
+        )}
+
+        {tab === 'vault' && (
+          <div className="space-y-6">
+            {vault.isLoading ? (
+              <div className="py-20 text-center text-sm text-[var(--color-text-muted)]">Loading…</div>
+            ) : !vault.data?.data ? (
+              <Panel title="Protocol Vault">
+                <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">
+                  No system:protocol-vault user found yet.
+                </div>
+              </Panel>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                  <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${vault.data.data.totals.totalValueSol} SOL`} sub="current holdings est." />
+                  <Stat icon={<Activity className="h-4 w-4" />} label="Claimed (all time)" value={`${vault.data.data.totals.totalClaimedSol} SOL`} sub={`${vault.data.data.totals.claimCount} claims`} />
+                  <Stat icon={<Flame className="h-4 w-4" />} label="Burned (fees)" value={`${vault.data.data.totals.totalBurnedSol} SOL`} sub="buyback + burn" />
+                  <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />
+                </div>
+
+                <Panel title="Vault Wallet">
+                  <div className="p-4 font-mono text-xs break-all text-[var(--color-text-secondary)]">
+                    {vault.data.data.walletAddress}
+                  </div>
+                </Panel>
+
+                <Panel title="Sub-Wallets & Holdings">
+                  <div className="divide-y divide-[var(--color-border-subtle)]">
+                    {vault.data.data.subWallets.map((w) => (
+                      <div key={w.address} className="p-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-bold uppercase">{w.riskTier}</span>
+                          <span className="font-mono text-[10px] text-[var(--color-text-muted)]">{w.address}</span>
+                        </div>
+                        {w.holdings.length === 0 ? (
+                          <div className="text-xs text-[var(--color-text-muted)]">No holdings</div>
+                        ) : (
+                          <table className="w-full text-xs">
+                            <thead className="text-left text-[var(--color-text-muted)]">
+                              <tr><th className="py-1">Token</th><th className="py-1 text-right">Amount</th><th className="py-1 text-right">Value (SOL)</th></tr>
+                            </thead>
+                            <tbody>
+                              {w.holdings.map((h) => (
+                                <tr key={h.tokenMint} className="border-t border-[var(--color-border-subtle)]">
+                                  <td className="py-1 font-mono">{h.tokenMint.slice(0, 8)}…{h.tokenMint.slice(-4)}</td>
+                                  <td className="py-1 text-right">{h.amount}</td>
+                                  <td className="py-1 text-right">{Number(h.valueSolEst).toFixed(4)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+
+                <Panel title="Recent Claims">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-[var(--color-text-muted)]">
+                      <tr><th className="p-3">When</th><th className="p-3 text-right">Amount (SOL)</th><th className="p-3 text-right">Fee (SOL)</th><th className="p-3 text-right">Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {vault.data.data.recentClaims.map((c) => (
+                        <tr key={c.id} className="border-t border-[var(--color-border-subtle)]">
+                          <td className="p-3 text-xs">{new Date(c.createdAt).toLocaleString()}</td>
+                          <td className="p-3 text-right">{c.amountSol}</td>
+                          <td className="p-3 text-right">{c.feeSol}</td>
+                          <td className="p-3 text-right text-xs">{c.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Panel>
+              </>
+            )}
+          </div>
         )}
       </main>
     </div>
