@@ -178,7 +178,7 @@ export default function DashboardPage() {
                 <Flame className="h-4 w-4" /> Tokens Burned
               </div>
               <div className="font-[family-name:var(--font-display)] text-2xl font-bold">
-                {Number(burns?.totalTokensBurned || 0).toLocaleString()}
+                {(Number(burns?.totalTokensBurned || 0) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </div>
             </div>
           </div>
