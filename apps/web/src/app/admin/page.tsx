@@ -691,6 +691,26 @@ function TweetCard({ tweet, index, onUpdated }: { tweet: Tweet; index: number; o
     onUpdated()
   }
 
+  const approve = async () => {
+    await fetch(`${API_BASE}/admin/tweets/${tweet.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'ACTIVE' }),
+    })
+    onUpdated()
+  }
+
+  const unapprove = async () => {
+    await fetch(`${API_BASE}/admin/tweets/${tweet.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ status: 'DRAFT' }),
+    })
+    onUpdated()
+  }
+
   const remove = async () => {
     if (!confirm('Delete this tweet?')) return
     await fetch(`${API_BASE}/admin/tweets/${tweet.id}`, { method: 'DELETE', headers: authHeaders(), credentials: 'include' })
@@ -790,6 +810,22 @@ function TweetCard({ tweet, index, onUpdated }: { tweet: Tweet; index: number; o
           )}
         </div>
         <div className="flex items-center gap-1">
+          {!editing && tweet.status === 'DRAFT' && (
+            <button
+              onClick={approve}
+              className="rounded-md border border-[#00D62B]/40 px-2 py-0.5 text-[11px] font-bold text-[#00D62B] hover:bg-[#00D62B]/10"
+            >
+              Approve
+            </button>
+          )}
+          {!editing && tweet.status === 'ACTIVE' && (
+            <button
+              onClick={unapprove}
+              className="rounded-md border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+            >
+              Unapprove
+            </button>
+          )}
           {!editing && (
             <button onClick={() => setEditing(true)} className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
               Edit
