@@ -19,6 +19,7 @@ import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
+import { VaultTwrChart as TwrChart } from '@/components/VaultTwrChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 
 export default function DashboardPage() {
@@ -205,6 +206,19 @@ export default function DashboardPage() {
           className="mb-8"
         >
           <PnlHistoryChart />
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.07 }}
+          className="mb-8"
+        >
+          <TwrChart
+            endpoint="/portfolio/twr-history"
+            title="Your Time-Weighted Return"
+            subtitle="Pure price performance · deposits and withdrawals neutralized · base 100"
+          />
         </motion.div>
 
         <motion.div

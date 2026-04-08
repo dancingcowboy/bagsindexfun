@@ -26,19 +26,29 @@ const RANGES = [
   { label: '30d', hours: 720 },
 ] as const
 
+interface Props {
+  endpoint?: string
+  title?: string
+  subtitle?: string
+}
+
 /**
- * Time-weighted return chart for the protocol vault. Strips out fee-claim
- * cashflows so the line reflects pure price performance, not "the vault
- * grew because more fees came in." Index normalized to 100 at the start
- * of the selected range.
+ * Time-weighted return chart. Strips out cashflows (fee claims for the
+ * vault, deposits/withdrawals for users) so the line reflects pure price
+ * performance, not "the wallet grew because more SOL came in." Index
+ * normalized to 100 at the start of the selected range.
  */
-export function VaultTwrChart() {
+export function VaultTwrChart({
+  endpoint = '/admin/vault-twr-history',
+  title = 'Vault Time-Weighted Return',
+  subtitle,
+}: Props = {}) {
   const [hours, setHours] = useState<number>(168)
 
   const q = useQuery({
-    queryKey: ['vault-twr-history', hours],
+    queryKey: ['twr-history', endpoint, hours],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/admin/vault-twr-history?hours=${hours}`, {
+      const res = await fetch(`${API_BASE}${endpoint}?hours=${hours}`, {
         credentials: 'include',
         headers: authHeaders(),
       })
@@ -60,9 +70,9 @@ export function VaultTwrChart() {
     <div className="card p-0 overflow-hidden">
       <div className="flex items-center justify-between px-6 pt-5 pb-2 flex-wrap gap-3">
         <div>
-          <h3 className="text-lg font-bold">Vault Time-Weighted Return</h3>
+          <h3 className="text-lg font-bold">{title}</h3>
           <p className="text-sm text-[var(--color-text-muted)]">
-            Pure price performance · {cashflowCount} fee-claim cashflows neutralized · base 100
+            {subtitle ?? `Pure price performance · ${cashflowCount} cashflows neutralized · base 100`}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">

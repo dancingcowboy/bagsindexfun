@@ -296,6 +296,110 @@ export async function portfolioRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /portfolio/twr-history?hours=168
+   *
+   * Time-weighted return for the authenticated user's portfolio. Same logic
+   * as /admin/vault-twr-history but scoped to the user — neutralizes
+   * deposit and withdrawal cashflows so the resulting line reflects pure
+   * price performance, regardless of when the user added or pulled funds.
+   *
+   *   step = (V_end - (deposits_in_period - withdrawals_in_period)) / V_start
+   *
+   * Index normalized to 100 at the first snapshot in range. Aggregates
+   * across all the user's sub-wallets (sums totalValueSol per timestamp).
+   */
+  app.get<{ Querystring: { hours?: string } }>('/twr-history', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const wallets = await db.subWallet.findMany({
+        where: { userId },
+        select: { id: true },
+      })
+      if (wallets.length === 0) {
+        return { success: true, data: { points: [], hours, cashflowCount: 0 } }
+      }
+
+      const snapshots = await db.pnlSnapshot.findMany({
+        where: {
+          subWalletId: { in: wallets.map((w) => w.id) },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { totalValueSol: true, createdAt: true },
+      })
+
+      // Sum across all sub-wallets per timestamp bucket (snapshot worker
+      // writes one row per wallet at the same instant).
+      const bucket = new Map<number, number>()
+      for (const s of snapshots) {
+        const t = s.createdAt.getTime()
+        bucket.set(t, (bucket.get(t) ?? 0) + Number(s.totalValueSol))
+      }
+      const merged = [...bucket.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([t, v]) => ({ t: new Date(t), v }))
+      if (merged.length < 2) {
+        return { success: true, data: { points: [], hours, cashflowCount: 0 } }
+      }
+
+      // Cashflows: deposits in - withdrawals out, both gross (the burn fee
+      // and slippage are internal costs that should hit the return, not
+      // be neutralized as a "user cashflow").
+      const [deposits, withdrawals] = await Promise.all([
+        db.deposit.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
+          select: { amountSol: true, confirmedAt: true, createdAt: true },
+        }),
+        db.withdrawal.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
+          select: { amountSol: true, confirmedAt: true, createdAt: true },
+        }),
+      ])
+      const cashflows: { t: number; amount: number }[] = []
+      for (const d of deposits) {
+        cashflows.push({
+          t: (d.confirmedAt ?? d.createdAt).getTime(),
+          amount: Number(d.amountSol),
+        })
+      }
+      for (const w of withdrawals) {
+        cashflows.push({
+          t: (w.confirmedAt ?? w.createdAt).getTime(),
+          amount: -Number(w.amountSol),
+        })
+      }
+
+      const points: { t: string; twr: number; valueSol: number }[] = []
+      let index = 100
+      points.push({ t: merged[0].t.toISOString(), twr: 100, valueSol: merged[0].v })
+      for (let i = 1; i < merged.length; i++) {
+        const prev = merged[i - 1]
+        const cur = merged[i]
+        let cf = 0
+        for (const c of cashflows) {
+          if (c.t > prev.t.getTime() && c.t <= cur.t.getTime()) cf += c.amount
+        }
+        let step = 1
+        if (prev.v > 0) {
+          const adj = cur.v - cf
+          step = adj / prev.v
+          if (!isFinite(step) || step <= 0) step = 1
+        }
+        index *= step
+        points.push({ t: cur.t.toISOString(), twr: index, valueSol: cur.v })
+      }
+
+      return { success: true, data: { points, hours, cashflowCount: cashflows.length } }
+    } catch (err) {
+      app.log.error(err, 'Failed to compute portfolio TWR')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /portfolio/token-price-history?hours=168
    * Per-token SOL price history (one sample per hour) for every token the
    * authenticated user currently holds. Each series is normalized to base
