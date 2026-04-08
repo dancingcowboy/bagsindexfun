@@ -1,6 +1,11 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getBagsSolValue, getMintDecimalsBatch, getJupiterPrices } from '@bags-index/solana'
+import {
+  getBagsSolValue,
+  getMintDecimalsBatch,
+  getJupiterPrices,
+  getDexVolumes,
+} from '@bags-index/solana'
 import { SOL_MINT } from '@bags-index/shared'
 import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
@@ -126,15 +131,19 @@ export async function processSnapshot(_job?: Job) {
     if (mintList.length > 0) {
       const decimals = await getMintDecimalsBatch(mintList)
 
-      // Fallback price source: Jupiter Lite Price API. Used when Bags has no
-      // route for a token (common for DEGEN tier — low-liquidity mints). We
-      // convert usdPrice → priceSol using Jupiter's WSOL usdPrice in the
-      // same response.
-      const jupPrices = await getJupiterPrices([...mintList, SOL_MINT])
+      // Fallback price sources for tokens with no Bags route (common for
+      // DEGEN tier). We try Bags first (the hackathon target), then
+      // DexScreener (best general coverage on Solana memes), then Jupiter.
+      // USD prices are converted to SOL via SOL/USD from Jupiter.
+      const [dexPrices, jupPrices] = await Promise.all([
+        getDexVolumes(mintList),
+        getJupiterPrices([...mintList, SOL_MINT]),
+      ])
       const solUsd = Number(jupPrices.get(SOL_MINT)?.usdPrice ?? 0)
 
       let priceWrites = 0
       let bagsHits = 0
+      let dexHits = 0
       let jupHits = 0
       for (const mint of mintList) {
         let priceSol: number | null = null
@@ -148,6 +157,14 @@ export async function processSnapshot(_job?: Job) {
             bagsHits++
           }
           await new Promise((r) => setTimeout(r, 100))
+        }
+
+        if (priceSol === null && solUsd > 0) {
+          const usd = Number(dexPrices.get(mint)?.priceUsd ?? 0)
+          if (usd > 0) {
+            priceSol = usd / solUsd
+            dexHits++
+          }
         }
 
         if (priceSol === null && solUsd > 0) {
@@ -165,7 +182,7 @@ export async function processSnapshot(_job?: Job) {
         priceWrites++
       }
       logger.info(
-        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} jup=${jupHits})`,
+        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} dex=${dexHits} jup=${jupHits})`,
       )
     }
   } catch (err) {
