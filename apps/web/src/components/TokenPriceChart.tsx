@@ -41,12 +41,18 @@ interface Props {
   endpoint?: string
   title?: string
   subtitle?: string
+  /**
+   * Optional tier to fetch the aggregated index line (weighted, chained across
+   * rebalances) from /index/aggregate-history and overlay on the chart.
+   */
+  aggregateTier?: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
 }
 
 export function TokenPriceChart({
   endpoint = '/portfolio/token-price-history',
   title = 'Index Token Performance',
   subtitle = 'Hourly prices · normalized to 100 at range start',
+  aggregateTier,
 }: Props = {}) {
   const [hours, setHours] = useState<number>(168)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -64,7 +70,23 @@ export function TokenPriceChart({
     refetchInterval: 5 * 60_000,
   })
 
+  const aggQ = useQuery({
+    queryKey: ['index-aggregate-history', aggregateTier, hours],
+    enabled: !!aggregateTier,
+    queryFn: async () => {
+      const res = await fetch(
+        `${API_BASE}/index/aggregate-history?tier=${aggregateTier}&hours=${hours}`,
+      )
+      if (!res.ok) throw new Error(`${res.status}`)
+      return (await res.json()) as {
+        data: { tier: string; points: { t: string; indexed: number }[] }
+      }
+    },
+    refetchInterval: 5 * 60_000,
+  })
+
   const tokens = q.data?.data?.tokens ?? []
+  const aggPoints = aggQ.data?.data?.points ?? []
 
   // Merge all token series onto a common timeline keyed by ISO timestamp.
   // Each row carries { t, SYMBOL1: indexed, SYMBOL2: indexed, ... }.
@@ -79,10 +101,16 @@ export function TokenPriceChart({
         map.set(ts, row)
       }
     }
+    for (const p of aggPoints) {
+      const ts = new Date(p.t).toISOString()
+      const row = map.get(ts) ?? { t: ts }
+      row.__INDEX__ = p.indexed
+      map.set(ts, row)
+    }
     return [...map.values()].sort(
       (a, b) => new Date(a.t as string).getTime() - new Date(b.t as string).getTime(),
     )
-  }, [tokens])
+  }, [tokens, aggPoints])
 
   const hasData = merged.length > 0
   const symbolKeys = tokens.map((t) => t.tokenSymbol ?? t.tokenMint.slice(0, 6))
@@ -163,13 +191,27 @@ export function TokenPriceChart({
                   dataKey={key}
                   stroke={COLORS[i % COLORS.length]}
                   strokeWidth={hovered === key ? 2.5 : 1.5}
-                  strokeOpacity={hovered ? (hovered === key ? 1 : 0.15) : 0.75}
+                  strokeOpacity={hovered ? (hovered === key ? 1 : 0.15) : 0.55}
                   dot={false}
                   connectNulls
                   onMouseEnter={() => setHovered(key)}
                   onMouseLeave={() => setHovered(null)}
                 />
               ))}
+              {aggregateTier && aggPoints.length > 0 && (
+                <Line
+                  type="monotone"
+                  dataKey="__INDEX__"
+                  name="INDEX"
+                  stroke="#ffffff"
+                  strokeWidth={hovered === '__INDEX__' ? 4 : 3}
+                  strokeOpacity={hovered && hovered !== '__INDEX__' ? 0.35 : 1}
+                  dot={false}
+                  connectNulls
+                  onMouseEnter={() => setHovered('__INDEX__')}
+                  onMouseLeave={() => setHovered(null)}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -178,6 +220,20 @@ export function TokenPriceChart({
       {hasData && (
         <div className="border-t border-[var(--color-border)] px-4 py-3">
           <div className="flex flex-wrap gap-2">
+            {aggregateTier && aggPoints.length > 0 && (
+              <button
+                onMouseEnter={() => setHovered('__INDEX__')}
+                onMouseLeave={() => setHovered(null)}
+                className="flex items-center gap-1.5 rounded-md border border-white/40 bg-white/5 px-2 py-1 text-[11px] font-bold transition-opacity"
+                style={{
+                  color: '#ffffff',
+                  opacity: hovered ? (hovered === '__INDEX__' ? 1 : 0.35) : 1,
+                }}
+              >
+                <span className="h-1.5 w-3 rounded-full" style={{ backgroundColor: '#ffffff' }} />
+                INDEX
+              </button>
+            )}
             {symbolKeys.map((key, i) => (
               <button
                 key={key}

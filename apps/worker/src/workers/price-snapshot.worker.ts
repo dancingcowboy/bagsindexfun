@@ -105,25 +105,21 @@ export async function processSnapshot(_job?: Job) {
     const uniqueMints = new Set<string>()
     for (const w of activeWallets) for (const h of w.holdings) uniqueMints.add(h.tokenMint)
 
-    // Also sample every token in the current top-10 per tier, regardless of
-    // whether any user holds them. This pre-populates the landing-page index
-    // chart with real data for tiers with no live users yet.
-    const latestCycle = await db.scoringCycle.findFirst({
-      where: { status: 'COMPLETED' },
-      orderBy: { completedAt: 'desc' },
-      select: { id: true },
+    // Also sample every token that has been in a tier top-10 during the last
+    // 14 days. This (a) pre-populates the landing-page chart for tiers with
+    // no live users yet, and (b) keeps individual lines from cutting off
+    // mid-chart when a token gets rotated out of the index — they keep
+    // streaming for a 14d tail window so the constituent lines stay visible.
+    const tailStart = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+    const recentScores = await db.tokenScore.findMany({
+      where: {
+        isBlacklisted: false,
+        rank: { gte: 1, lte: 10 },
+        scoredAt: { gte: tailStart },
+      },
+      select: { tokenMint: true },
     })
-    if (latestCycle) {
-      const topScores = await db.tokenScore.findMany({
-        where: {
-          cycleId: latestCycle.id,
-          isBlacklisted: false,
-          rank: { lte: 10 },
-        },
-        select: { tokenMint: true },
-      })
-      for (const s of topScores) uniqueMints.add(s.tokenMint)
-    }
+    for (const s of recentScores) uniqueMints.add(s.tokenMint)
 
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {
