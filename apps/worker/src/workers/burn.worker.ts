@@ -54,18 +54,30 @@ async function processBurn(job: Job<BurnJobData>) {
 
   if (burnLamports <= 0n) return
 
-  // Create burn record
-  const burnRecord = await db.burnRecord.create({
-    data: {
-      depositId: depositId ?? null,
-      withdrawalId: withdrawalId ?? null,
-      platformTokenMint,
-      tokensBought: 0n,
-      tokensBurned: 0n,
-      solSpent: burnSol,
-      status: 'PENDING',
-    },
-  })
+  // Idempotent: reuse any existing row for this deposit/withdrawal. If the
+  // previous attempt already CONFIRMED, bail out — never double-burn.
+  const existing = depositId
+    ? await db.burnRecord.findUnique({ where: { depositId } })
+    : withdrawalId
+      ? await db.burnRecord.findUnique({ where: { withdrawalId } })
+      : null
+  if (existing?.status === 'CONFIRMED') {
+    logger.info(`[burn] ${source} already CONFIRMED (burn ${existing.id}) — skipping`)
+    return
+  }
+  const burnRecord = existing
+    ? existing
+    : await db.burnRecord.create({
+        data: {
+          depositId: depositId ?? null,
+          withdrawalId: withdrawalId ?? null,
+          platformTokenMint,
+          tokensBought: 0n,
+          tokensBurned: 0n,
+          solSpent: burnSol,
+          status: 'PENDING',
+        },
+      })
 
   try {
     // The protocol vault is the buy-and-burn wallet — same Privy Server Wallet
