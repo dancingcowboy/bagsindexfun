@@ -110,6 +110,8 @@ interface VaultData {
   }[]
   totals: {
     totalValueSol: string
+    tokenValueSol?: string
+    nativeSol?: string
     totalClaimedSol: string
     totalBurnedSol: string
     claimCount: number
@@ -622,7 +624,7 @@ export default function AdminPage() {
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                  <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${vault.data.data.totals.totalValueSol} SOL`} sub="current holdings est." />
+                  <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${vault.data.data.totals.totalValueSol} SOL`} sub={vault.data.data.totals.tokenValueSol != null ? `tokens ${vault.data.data.totals.tokenValueSol} + native ${vault.data.data.totals.nativeSol}` : 'current holdings est.'} />
                   <Stat icon={<Activity className="h-4 w-4" />} label="Claimed (all time)" value={`${vault.data.data.totals.totalClaimedSol} SOL`} sub={`${vault.data.data.totals.claimCount} claims`} />
                   <Stat icon={<Flame className="h-4 w-4" />} label="Burned (fees)" value={`${vault.data.data.totals.totalBurnedSol} SOL`} sub="buyback + burn" />
                   <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />

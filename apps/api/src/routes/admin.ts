@@ -164,10 +164,27 @@ export async function adminRoutes(app: FastifyInstance) {
         where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
         include: {
           subWallets: { include: { holdings: true } },
-          deposits: { orderBy: { createdAt: 'desc' }, take: 20 },
         },
       })
       if (!user) return { success: true, data: null }
+
+      // Real fee claims write a VAULT_FEE_CLAIM audit log row pointing at the
+      // resulting Deposit. Use that as the source of truth for "claims" so
+      // manual seed/synthetic deposits don't pollute the dashboard.
+      const claimLogs = await db.auditLog.findMany({
+        where: { action: 'VAULT_FEE_CLAIM' },
+        orderBy: { createdAt: 'desc' },
+        select: { resource: true },
+      })
+      const claimDepositIds = claimLogs
+        .map((l) => (l.resource ?? '').replace(/^deposit:/, ''))
+        .filter(Boolean)
+      const claimDeposits = claimDepositIds.length
+        ? await db.deposit.findMany({
+            where: { id: { in: claimDepositIds }, userId: user.id },
+            orderBy: { createdAt: 'desc' },
+          })
+        : []
 
       // Resolve symbol/name per mint from the most recent TokenScore row.
       const mints = new Set<string>()
@@ -184,12 +201,32 @@ export async function adminRoutes(app: FastifyInstance) {
         if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
       }
 
-      const totalValueSol = user.subWallets.reduce(
+      const tokenValueSol = user.subWallets.reduce(
         (sum, w) => sum + w.holdings.reduce((h, x) => h + Number(x.valueSolEst || 0), 0),
         0,
       )
-      const totalClaimedSol = user.deposits.reduce((s, d) => s + Number(d.amountSol || 0), 0)
-      const totalBurnedSol = user.deposits.reduce((s, d) => s + Number(d.feeSol || 0), 0)
+
+      // Native SOL balance on the vault wallet — counts toward total value.
+      let nativeSol = 0
+      try {
+        const { getNativeSolBalance } = await import('@bags-index/solana')
+        nativeSol = await getNativeSolBalance(user.walletAddress)
+      } catch (err) {
+        app.log.warn({ err }, '[admin/vault] native SOL fetch failed')
+      }
+      const totalValueSol = tokenValueSol + nativeSol
+
+      const totalClaimedSol = claimDeposits.reduce(
+        (s, d) => s + Number(d.amountSol || 0),
+        0,
+      )
+
+      // Burned SOL — actual amounts spent on buyback+burn, scoped to this user.
+      const burns = await db.burnRecord.findMany({
+        where: { deposit: { userId: user.id } },
+        select: { solSpent: true },
+      })
+      const totalBurnedSol = burns.reduce((s, b) => s + Number(b.solSpent || 0), 0)
 
       return {
         success: true,
@@ -211,11 +248,13 @@ export async function adminRoutes(app: FastifyInstance) {
           })),
           totals: {
             totalValueSol: totalValueSol.toFixed(6),
+            tokenValueSol: tokenValueSol.toFixed(6),
+            nativeSol: nativeSol.toFixed(6),
             totalClaimedSol: totalClaimedSol.toFixed(6),
             totalBurnedSol: totalBurnedSol.toFixed(6),
-            claimCount: user.deposits.length,
+            claimCount: claimDeposits.length,
           },
-          recentClaims: user.deposits.slice(0, 10).map((d) => ({
+          recentClaims: claimDeposits.slice(0, 10).map((d) => ({
             id: d.id,
             amountSol: Number(d.amountSol).toFixed(6),
             feeSol: Number(d.feeSol).toFixed(6),

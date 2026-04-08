@@ -1,6 +1,7 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getBagsSolValue, getMintDecimalsBatch } from '@bags-index/solana'
+import { getBagsSolValue, getMintDecimalsBatch, getJupiterPrices } from '@bags-index/solana'
+import { SOL_MINT } from '@bags-index/shared'
 import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -124,22 +125,48 @@ export async function processSnapshot(_job?: Job) {
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {
       const decimals = await getMintDecimalsBatch(mintList)
+
+      // Fallback price source: Jupiter Lite Price API. Used when Bags has no
+      // route for a token (common for DEGEN tier — low-liquidity mints). We
+      // convert usdPrice → priceSol using Jupiter's WSOL usdPrice in the
+      // same response.
+      const jupPrices = await getJupiterPrices([...mintList, SOL_MINT])
+      const solUsd = Number(jupPrices.get(SOL_MINT)?.usdPrice ?? 0)
+
       let priceWrites = 0
+      let bagsHits = 0
+      let jupHits = 0
       for (const mint of mintList) {
+        let priceSol: number | null = null
+
         const dec = decimals.get(mint)
-        if (dec === undefined) continue
-        // One whole token in base units
-        const probe = (10n ** BigInt(dec)).toString()
-        const lamports = await getBagsSolValue(mint, probe)
-        if (lamports === null) continue
-        const priceSol = Number(lamports) / LAMPORTS_PER_SOL
+        if (dec !== undefined) {
+          const probe = (10n ** BigInt(dec)).toString()
+          const lamports = await getBagsSolValue(mint, probe)
+          if (lamports !== null) {
+            priceSol = Number(lamports) / LAMPORTS_PER_SOL
+            bagsHits++
+          }
+          await new Promise((r) => setTimeout(r, 100))
+        }
+
+        if (priceSol === null && solUsd > 0) {
+          const usd = Number(jupPrices.get(mint)?.usdPrice ?? 0)
+          if (usd > 0) {
+            priceSol = usd / solUsd
+            jupHits++
+          }
+        }
+
+        if (priceSol === null) continue
         await db.tokenPriceSnapshot.create({
           data: { tokenMint: mint, priceSol: priceSol.toFixed(12) },
         })
         priceWrites++
-        await new Promise((r) => setTimeout(r, 100))
       }
-      logger.info(`[price-snapshot] wrote ${priceWrites} token price samples`)
+      logger.info(
+        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} jup=${jupHits})`,
+      )
     }
   } catch (err) {
     logger.error(`[price-snapshot] per-token sampling failed: ${err}`)
