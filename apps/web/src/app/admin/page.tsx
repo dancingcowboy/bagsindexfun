@@ -640,6 +640,43 @@ export default function AdminPage() {
                   subtitle="Per-token hourly prices · normalized to 100 at range start"
                 />
 
+                <Panel title="Switch Vault Tier">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      Current: <strong>{vault.data.data.subWallets[0]?.riskTier ?? '—'}</strong>
+                    </span>
+                    {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((t) => {
+                      const current = vault.data?.data?.subWallets[0]?.riskTier
+                      const disabled = current === t
+                      return (
+                        <button
+                          key={t}
+                          disabled={disabled}
+                          onClick={async () => {
+                            if (!confirm(`Switch protocol vault → ${t}? This rebalances all vault holdings.`)) return
+                            try {
+                              const res = await fetch(`${API_BASE}/admin/vault/switch`, {
+                                method: 'POST',
+                                credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ toTier: t }),
+                              })
+                              if (!res.ok) throw new Error(`${res.status}`)
+                              alert(`Vault switch to ${t} enqueued`)
+                              vault.refetch()
+                            } catch (e: any) {
+                              alert(`Failed: ${e?.message ?? e}`)
+                            }
+                          }}
+                          className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase disabled:opacity-30"
+                        >
+                          {t}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Panel>
+
                 <Panel title="Vault Wallet">
                   <div className="p-4 font-mono text-xs break-all text-[var(--color-text-secondary)]">
                     {vault.data.data.walletAddress}

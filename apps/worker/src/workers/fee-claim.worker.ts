@@ -24,8 +24,12 @@ const depositQueue = new Queue(QUEUE_DEPOSIT, { connection: redis })
 const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
 
 /**
- * Ensure the protocol vault is registered as a system user with a BALANCED
- * sub-wallet pointing at the on-chain vault wallet. Idempotent.
+ * Ensure the protocol vault is registered as a system user with a single
+ * sub-wallet pointing at the on-chain vault wallet. The sub-wallet's
+ * `riskTier` may have been mutated by an admin vault-switch — we look it
+ * up by privyUserId rather than assuming BALANCED, so fee deposits keep
+ * landing in whatever tier the vault is currently configured for. The
+ * default tier on first creation is BALANCED. Idempotent.
  */
 async function ensureSystemVaultSubWallet(
   vaultAddress: string,
@@ -39,16 +43,21 @@ async function ensureSystemVaultSubWallet(
       walletAddress: vaultAddress,
     },
   })
-  const subWallet = await db.subWallet.upsert({
-    where: { userId_riskTier: { userId: user.id, riskTier: 'BALANCED' } },
-    update: {},
-    create: {
-      userId: user.id,
-      privyWalletId: vaultPrivyWalletId,
-      address: vaultAddress,
-      riskTier: 'BALANCED',
-    },
+  // Look up the vault sub-wallet by userId only — the protocol vault has
+  // exactly one sub-wallet whose riskTier may change over time.
+  let subWallet = await db.subWallet.findFirst({
+    where: { userId: user.id },
   })
+  if (!subWallet) {
+    subWallet = await db.subWallet.create({
+      data: {
+        userId: user.id,
+        privyWalletId: vaultPrivyWalletId,
+        address: vaultAddress,
+        riskTier: 'BALANCED',
+      },
+    })
+  }
   return { user, subWallet }
 }
 
@@ -141,16 +150,17 @@ async function processFeeClaim(_job: Job) {
 
   // 3. Make sure the system vault sub-wallet exists, then create a Deposit
   // row for it and enqueue the same allocation + burn jobs that a real
-  // user deposit would. Auto-claimed fees always go into the BALANCED tier.
-  const { user: systemUser } = await ensureSystemVaultSubWallet(
-    vaultAddress,
-    vaultPrivyWalletId,
-  )
+  // user deposit would. Auto-claimed fees flow into whichever tier the
+  // protocol vault is currently configured for (default BALANCED, but an
+  // admin vault-switch can move it to CONSERVATIVE or DEGEN).
+  const { user: systemUser, subWallet: vaultSubWallet } =
+    await ensureSystemVaultSubWallet(vaultAddress, vaultPrivyWalletId)
+  const activeTier = vaultSubWallet.riskTier
 
   const deposit = await db.deposit.create({
     data: {
       userId: systemUser.id,
-      riskTier: 'BALANCED',
+      riskTier: activeTier,
       amountSol: totalSol,
       feeSol: burnSol,
       status: 'CONFIRMED',
@@ -168,7 +178,7 @@ async function processFeeClaim(_job: Job) {
         sol: totalSol,
         burnSol,
         depositFeeBps: DEPOSIT_FEE_BPS,
-        riskTier: 'BALANCED',
+        riskTier: activeTier,
       },
     },
   })
@@ -183,7 +193,7 @@ async function processFeeClaim(_job: Job) {
   })
 
   logger.info(
-    `[fee-claim] Claimed ${totalSol.toFixed(6)} SOL across ${withFees.length} position(s); enqueued BALANCED allocation + ${burnSol.toFixed(6)} SOL burn (deposit ${deposit.id})`,
+    `[fee-claim] Claimed ${totalSol.toFixed(6)} SOL across ${withFees.length} position(s); enqueued ${activeTier} allocation + ${burnSol.toFixed(6)} SOL burn (deposit ${deposit.id})`,
   )
 }
 

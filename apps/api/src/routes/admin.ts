@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { blacklistTokenSchema, RISK_TIERS, TWEET_PLAN } from '@bags-index/shared'
+import { blacklistTokenSchema, RISK_TIERS, TWEET_PLAN, type RiskTier } from '@bags-index/shared'
 import { requireAdmin } from '../middleware/auth.js'
-import { scoringQueue, rebalanceQueue, priceSnapshotQueue } from '../queue/queues.js'
+import { scoringQueue, rebalanceQueue, priceSnapshotQueue, vaultSwitchQueue } from '../queue/queues.js'
 
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
@@ -226,6 +226,46 @@ export async function adminRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to load vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/vault/switch — switch the protocol vault to a different tier.
+   * Body: { toTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN' }
+   * Enqueues a vault-switch job that smart-delta-rebalances the vault sub-wallet
+   * in place and flips its riskTier label so future fee-claim deposits land in
+   * the new tier.
+   */
+  app.post<{ Body: { toTier?: string } }>('/vault/switch', async (req, reply) => {
+    try {
+      const toTier = req.body?.toTier as RiskTier | undefined
+      if (!toTier || !RISK_TIERS.includes(toTier)) {
+        return reply.status(400).send({ error: 'Invalid toTier' })
+      }
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: true },
+      })
+      if (!user || user.subWallets.length === 0) {
+        return reply.status(404).send({ error: 'Protocol vault not initialized' })
+      }
+      const vault = user.subWallets[0]
+      if (vault.riskTier === toTier) {
+        return reply.status(409).send({ error: `Vault already on ${toTier}` })
+      }
+      const job = await vaultSwitchQueue.add('vault-switch', { toTier })
+      await db.auditLog.create({
+        data: {
+          action: 'VAULT_SWITCH_REQUESTED',
+          resource: `vault:${vault.id}`,
+          metadata: { fromTier: vault.riskTier, toTier, jobId: job.id },
+          userId: req.authUser?.userId,
+        },
+      })
+      return { success: true, data: { jobId: job.id, fromTier: vault.riskTier, toTier } }
+    } catch (err) {
+      app.log.error(err, 'Failed to enqueue vault switch')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })
