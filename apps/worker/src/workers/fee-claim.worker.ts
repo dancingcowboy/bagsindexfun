@@ -123,8 +123,11 @@ async function processFeeClaim(_job: Job) {
         `[fee-claim] Claimed ${(Number(claimed) / LAMPORTS_PER_SOL).toFixed(6)} SOL from ${pos.baseMint.slice(0, 8)}`,
       )
     } catch (err) {
+      const anyErr = err as any
+      const body = anyErr?.response?.data
+      const status = anyErr?.response?.status
       logger.error(
-        `[fee-claim] Claim failed for ${pos.baseMint.slice(0, 8)}: ${err}`,
+        `[fee-claim] Claim failed for ${pos.baseMint.slice(0, 8)}: status=${status} body=${typeof body === 'string' ? body : JSON.stringify(body)} msg=${anyErr?.message}`,
       )
     }
   }
