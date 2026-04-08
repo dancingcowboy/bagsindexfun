@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { usePrivy } from '@privy-io/react-auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
@@ -111,19 +112,31 @@ export default function AdminPage() {
   // render nothing so non-admins never see the layout flash. If the user is
   // not an admin (or not authenticated), bounce silently to the landing page —
   // no "admin only" message, no invitation to poke.
+  const { ready: privyReady, authenticated: privyAuth } = usePrivy()
+  // Wait for Privy to finish hydrating AND for the AuthBridge to have had a
+  // chance to set the bags_jwt cookie before we hit /auth/me — otherwise the
+  // query races the login bridge, gets a 401, and silently bounces the admin
+  // to the landing page.
   const me = useQuery({
     queryKey: ['auth-me'],
     queryFn: () => fetchJson<{ data: { isAdmin?: boolean } }>('/auth/me'),
-    retry: false,
+    enabled: privyReady && privyAuth,
+    retry: 3,
+    retryDelay: (attempt) => 500 * (attempt + 1),
     staleTime: 60_000,
   })
 
   useEffect(() => {
-    if (me.isLoading) return
+    if (!privyReady) return
+    if (!privyAuth) {
+      router.replace('/')
+      return
+    }
+    if (me.isLoading || me.isFetching) return
     if (me.isError || !me.data?.data?.isAdmin) {
       router.replace('/')
     }
-  }, [me.isLoading, me.isError, me.data, router])
+  }, [privyReady, privyAuth, me.isLoading, me.isFetching, me.isError, me.data, router])
 
   const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign'>('overview')
 
@@ -191,7 +204,7 @@ export default function AdminPage() {
 
   // Hard gate: render nothing while we resolve identity OR while we're
   // bouncing a non-admin away. Non-admins never see any admin chrome.
-  if (me.isLoading || !me.data?.data?.isAdmin) {
+  if (!privyReady || !privyAuth || me.isLoading || me.isFetching || !me.data?.data?.isAdmin) {
     return <div className="min-h-screen bg-[var(--color-bg-primary)]" />
   }
 
