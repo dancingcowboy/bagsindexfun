@@ -19,3 +19,4 @@ export { buildBurnTransaction, getAtaBalance, getMintDecimalsBatch } from './bur
 export { toBase58 } from './util.js'
 export { getPrivy, createSolanaServerWallet, signVersionedTxBase58, signVersionedTxBytes } from './privy.js'
 export { transferSolFromServerWallet } from './transfer.js'
+export { getLiveHoldings, type LiveHolding, type LiveHoldingsResult } from './live-holdings.js'

@@ -696,6 +696,7 @@ export default function AdminPage() {
                             method: 'POST',
                             credentials: 'include',
                             headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                            body: '{}',
                           })
                           const body = await res.json()
                           if (!res.ok) throw new Error(body?.error || `${res.status}`)

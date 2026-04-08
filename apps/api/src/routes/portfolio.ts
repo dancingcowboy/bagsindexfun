@@ -31,24 +31,94 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return { success: true, data: { totalValueSol: '0', tiers: [] } }
       }
 
+      // Live read from chain + price APIs for each sub-wallet. DB rows
+      // are still authoritative for cost basis / PnL / allocation intent,
+      // but the displayed amount + value reflects real on-chain state.
+      const { getLiveHoldings } = await import('@bags-index/solana')
+      const liveByAddress = new Map<
+        string,
+        Awaited<ReturnType<typeof getLiveHoldings>> | null
+      >()
+      await Promise.all(
+        wallets.map(async (w) => {
+          try {
+            liveByAddress.set(w.address, await getLiveHoldings(w.address))
+          } catch (err) {
+            app.log.warn({ err, wallet: w.address }, '[portfolio] live fetch failed')
+            liveByAddress.set(w.address, null)
+          }
+        }),
+      )
+
+      // Pull token symbol/name from recent TokenScore rows so the UI has
+      // labels for every mint we display (live or DB).
+      const mints = new Set<string>()
+      for (const w of wallets) for (const h of w.holdings) mints.add(h.tokenMint)
+      for (const live of liveByAddress.values()) {
+        if (live) for (const h of live.holdings) mints.add(h.tokenMint)
+      }
+      const scores = mints.size
+        ? await db.tokenScore.findMany({
+            where: { tokenMint: { in: [...mints] } },
+            orderBy: { scoredAt: 'desc' },
+            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+          })
+        : []
+      const metaByMint = new Map<string, { symbol: string | null; name: string | null }>()
+      for (const s of scores) {
+        if (!metaByMint.has(s.tokenMint))
+          metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+      }
+
       const tiers = wallets.map((w) => {
-        const totalValueSol = w.holdings.reduce(
-          (sum: number, h) => sum + Number(h.valueSolEst),
-          0,
-        )
+        const live = liveByAddress.get(w.address)
+        if (live) {
+          const tokenValueSol = live.holdings.reduce((s, h) => s + h.valueSol, 0)
+          const totalValueSol = tokenValueSol + live.nativeSol
+          return {
+            riskTier: w.riskTier,
+            walletAddress: w.address,
+            totalValueSol: totalValueSol.toFixed(9),
+            nativeSol: live.nativeSol.toFixed(9),
+            holdings: live.holdings.map((h) => {
+              const meta = metaByMint.get(h.tokenMint)
+              return {
+                tokenMint: h.tokenMint,
+                tokenSymbol: meta?.symbol ?? null,
+                tokenName: meta?.name ?? null,
+                amount: h.amount,
+                valueSol: h.valueSol.toFixed(9),
+                priceSource: h.source,
+                allocationPct:
+                  tokenValueSol > 0
+                    ? ((h.valueSol / tokenValueSol) * 100).toFixed(2)
+                    : '0',
+              }
+            }),
+          }
+        }
+
+        // Fallback to DB if live read failed.
+        const tokenValueSol = w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
         return {
           riskTier: w.riskTier,
           walletAddress: w.address,
-          totalValueSol: totalValueSol.toFixed(9),
-          holdings: w.holdings.map((h) => ({
-            tokenMint: h.tokenMint,
-            amount: h.amount.toString(),
-            valueSol: Number(h.valueSolEst).toFixed(9),
-            allocationPct:
-              totalValueSol > 0
-                ? ((Number(h.valueSolEst) / totalValueSol) * 100).toFixed(2)
-                : '0',
-          })),
+          totalValueSol: tokenValueSol.toFixed(9),
+          nativeSol: '0',
+          holdings: w.holdings.map((h) => {
+            const meta = metaByMint.get(h.tokenMint)
+            return {
+              tokenMint: h.tokenMint,
+              tokenSymbol: meta?.symbol ?? null,
+              tokenName: meta?.name ?? null,
+              amount: h.amount.toString(),
+              valueSol: Number(h.valueSolEst).toFixed(9),
+              allocationPct:
+                tokenValueSol > 0
+                  ? ((Number(h.valueSolEst) / tokenValueSol) * 100).toFixed(2)
+                  : '0',
+            }
+          }),
         }
       })
 

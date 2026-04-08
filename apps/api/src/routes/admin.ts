@@ -288,9 +288,22 @@ export async function adminRoutes(app: FastifyInstance) {
           })
         : []
 
+      // Live read from chain + price APIs — the source of truth. DB
+      // holdings are kept in sync for cost basis / PnL snapshots, but for
+      // display we always read through.
+      let live: Awaited<ReturnType<typeof import('@bags-index/solana').getLiveHoldings>> | null = null
+      try {
+        const { getLiveHoldings } = await import('@bags-index/solana')
+        live = await getLiveHoldings(user.walletAddress)
+      } catch (err) {
+        app.log.warn({ err }, '[admin/vault] live holdings fetch failed')
+      }
+
       // Resolve symbol/name per mint from the most recent TokenScore row.
+      // Include both DB holdings and (if available) live on-chain mints.
       const mints = new Set<string>()
       for (const w of user.subWallets) for (const h of w.holdings) mints.add(h.tokenMint)
+      if (live) for (const h of live.holdings) mints.add(h.tokenMint)
       const scores = mints.size
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: [...mints] } },
@@ -308,15 +321,8 @@ export async function adminRoutes(app: FastifyInstance) {
         0,
       )
 
-      // Native SOL balance on the vault wallet — counts toward total value.
-      let nativeSol = 0
-      try {
-        const { getNativeSolBalance } = await import('@bags-index/solana')
-        nativeSol = await getNativeSolBalance(user.walletAddress)
-      } catch (err) {
-        app.log.warn({ err }, '[admin/vault] native SOL fetch failed')
-      }
-      const totalValueSol = tokenValueSol + nativeSol
+      const nativeSol = live?.nativeSol ?? 0
+      const totalValueSol = live?.totalValueSol ?? tokenValueSol + nativeSol
 
       const totalClaimedSol = claimDeposits.reduce(
         (s, d) => s + Number(d.amountSol || 0),
@@ -334,19 +340,35 @@ export async function adminRoutes(app: FastifyInstance) {
         success: true,
         data: {
           walletAddress: user.walletAddress,
-          subWallets: user.subWallets.map((w) => ({
+          subWallets: user.subWallets.map((w, idx) => ({
             riskTier: w.riskTier,
             address: w.address,
-            holdings: w.holdings.map((h) => {
-              const meta = metaByMint.get(h.tokenMint)
-              return {
-                tokenMint: h.tokenMint,
-                tokenSymbol: meta?.symbol ?? null,
-                tokenName: meta?.name ?? null,
-                amount: h.amount.toString(),
-                valueSolEst: h.valueSolEst?.toString() ?? '0',
-              }
-            }),
+            // First sub-wallet uses live on-chain holdings (the vault
+            // currently has a single sub-wallet). Any additional wallets
+            // fall back to DB rows.
+            holdings:
+              idx === 0 && live
+                ? live.holdings.map((h) => {
+                    const meta = metaByMint.get(h.tokenMint)
+                    return {
+                      tokenMint: h.tokenMint,
+                      tokenSymbol: meta?.symbol ?? null,
+                      tokenName: meta?.name ?? null,
+                      amount: h.amount,
+                      valueSolEst: h.valueSol.toFixed(6),
+                      priceSource: h.source,
+                    }
+                  })
+                : w.holdings.map((h) => {
+                    const meta = metaByMint.get(h.tokenMint)
+                    return {
+                      tokenMint: h.tokenMint,
+                      tokenSymbol: meta?.symbol ?? null,
+                      tokenName: meta?.name ?? null,
+                      amount: h.amount.toString(),
+                      valueSolEst: h.valueSolEst?.toString() ?? '0',
+                    }
+                  }),
           })),
           totals: {
             totalValueSol: totalValueSol.toFixed(6),
