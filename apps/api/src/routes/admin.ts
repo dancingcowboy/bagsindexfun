@@ -13,6 +13,67 @@ export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
 
   /**
+   * GET /admin/vault-pnl-history?hours=168
+   * Hourly PnL snapshot history for the protocol vault's sub-wallets.
+   * Admin-gated; mirrors the user-scoped /portfolio/pnl-history shape so
+   * the same chart component renders it.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/vault-pnl-history', async (req, reply) => {
+    try {
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: { select: { id: true, address: true, riskTier: true } } },
+      })
+      if (!user || user.subWallets.length === 0) {
+        return { success: true, data: { tiers: [], hours } }
+      }
+
+      const snapshots = await db.pnlSnapshot.findMany({
+        where: {
+          subWalletId: { in: user.subWallets.map((w) => w.id) },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          subWalletId: true,
+          totalValueSol: true,
+          totalCostSol: true,
+          unrealizedSol: true,
+          realizedSol: true,
+          createdAt: true,
+        },
+      })
+
+      const byWallet = new Map<string, typeof snapshots>()
+      for (const s of snapshots) {
+        const arr = byWallet.get(s.subWalletId) ?? []
+        arr.push(s)
+        byWallet.set(s.subWalletId, arr)
+      }
+
+      const tiers = user.subWallets.map((w) => ({
+        riskTier: w.riskTier,
+        walletAddress: w.address,
+        points: (byWallet.get(w.id) ?? []).map((s) => ({
+          t: s.createdAt,
+          valueSol: s.totalValueSol.toString(),
+          costSol: s.totalCostSol.toString(),
+          unrealizedSol: s.unrealizedSol.toString(),
+          realizedSol: s.realizedSol.toString(),
+        })),
+      }))
+
+      return { success: true, data: { tiers, hours } }
+    } catch (err) {
+      app.log.error(err, 'Failed to load vault pnl history')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * POST /admin/trigger-price-snapshot — enqueue an immediate price snapshot.
    * Useful to seed initial data so the PnL chart isn't empty before the
    * first :00 UTC cron tick.

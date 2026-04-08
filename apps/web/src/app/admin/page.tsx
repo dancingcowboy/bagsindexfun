@@ -7,6 +7,7 @@ import { usePrivy } from '@privy-io/react-auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
+import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -625,6 +626,12 @@ export default function AdminPage() {
                   <Stat icon={<Flame className="h-4 w-4" />} label="Burned (fees)" value={`${vault.data.data.totals.totalBurnedSol} SOL`} sub="buyback + burn" />
                   <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />
                 </div>
+
+                <PnlHistoryChart
+                  endpoint="/admin/vault-pnl-history"
+                  title="Protocol Vault PnL"
+                  subtitle="Hourly snapshots of the system vault — value in SOL per tier"
+                />
 
                 <Panel title="Vault Wallet">
                   <div className="p-4 font-mono text-xs break-all text-[var(--color-text-secondary)]">

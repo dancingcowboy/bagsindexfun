@@ -39,13 +39,24 @@ const RANGES = [
   { label: '90d', hours: 2160 },
 ] as const
 
-export function PnlHistoryChart() {
+interface Props {
+  /** API path that returns `{ data: { tiers: TierHistory[] } }`. Defaults to user portfolio. */
+  endpoint?: string
+  title?: string
+  subtitle?: string
+}
+
+export function PnlHistoryChart({
+  endpoint = '/portfolio/pnl-history',
+  title = 'Vault PnL History',
+  subtitle = 'Hourly snapshots · value in SOL per tier',
+}: Props = {}) {
   const [hours, setHours] = useState<number>(168)
 
   const q = useQuery({
-    queryKey: ['pnl-history', hours],
+    queryKey: ['pnl-history', endpoint, hours],
     queryFn: async () => {
-      const res = await fetch(`${API_BASE}/portfolio/pnl-history?hours=${hours}`, {
+      const res = await fetch(`${API_BASE}${endpoint}?hours=${hours}`, {
         credentials: 'include',
         headers: authHeaders(),
       })
@@ -79,10 +90,8 @@ export function PnlHistoryChart() {
     <div className="card p-0 overflow-hidden">
       <div className="flex items-center justify-between px-6 pt-5 pb-2 flex-wrap gap-3">
         <div>
-          <h3 className="text-lg font-bold">Vault PnL History</h3>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            Hourly snapshots · value in SOL per tier
-          </p>
+          <h3 className="text-lg font-bold">{title}</h3>
+          <p className="text-sm text-[var(--color-text-muted)]">{subtitle}</p>
         </div>
         <div className="flex items-center gap-1">
           {RANGES.map((r) => (
