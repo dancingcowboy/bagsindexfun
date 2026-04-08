@@ -683,6 +683,37 @@ export default function AdminPage() {
                   </div>
                 </Panel>
 
+                <Panel title="Reconcile Holdings">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <span className="text-xs text-[var(--color-text-muted)]">
+                      Sync DB holdings to actual on-chain balances (Helius). Fixes drift from slippage / partial fills.
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Reconcile vault holdings to on-chain balances?')) return
+                        try {
+                          const res = await fetch(`${API_BASE}/admin/vault/reconcile`, {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                          })
+                          const body = await res.json()
+                          if (!res.ok) throw new Error(body?.error || `${res.status}`)
+                          alert(
+                            `Reconciled: ${body.data.updated} updated, ${body.data.inserted} inserted, ${body.data.deleted} deleted (${body.data.onChainMints} on-chain mints)`,
+                          )
+                          vault.refetch()
+                        } catch (e: any) {
+                          alert(`Failed: ${e?.message ?? e}`)
+                        }
+                      }}
+                      className="rounded border border-[#00D62B] bg-[#00D62B]/10 px-3 py-1 text-xs font-bold uppercase text-[#00D62B]"
+                    >
+                      Reconcile now
+                    </button>
+                  </div>
+                </Panel>
+
                 <Panel title="Vault Wallet">
                   <div className="p-4 font-mono text-xs break-all text-[var(--color-text-secondary)]">
                     {vault.data.data.walletAddress}
