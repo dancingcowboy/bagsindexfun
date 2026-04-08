@@ -108,6 +108,68 @@ export async function portfolioRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /portfolio/pnl-history?hours=168
+   * Hourly PnL snapshot history for each of the user's sub-wallets.
+   * Ownership-scoped: only returns rows belonging to wallets owned by
+   * the authenticated user.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/pnl-history', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const wallets = await db.subWallet.findMany({
+        where: { userId },
+        select: { id: true, address: true, riskTier: true },
+      })
+      if (wallets.length === 0) {
+        return { success: true, data: { tiers: [] } }
+      }
+
+      const snapshots = await db.pnlSnapshot.findMany({
+        where: {
+          subWalletId: { in: wallets.map((w) => w.id) },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          subWalletId: true,
+          totalValueSol: true,
+          totalCostSol: true,
+          unrealizedSol: true,
+          realizedSol: true,
+          createdAt: true,
+        },
+      })
+
+      const byWallet = new Map<string, typeof snapshots>()
+      for (const s of snapshots) {
+        const arr = byWallet.get(s.subWalletId) ?? []
+        arr.push(s)
+        byWallet.set(s.subWalletId, arr)
+      }
+
+      const tiers = wallets.map((w) => ({
+        riskTier: w.riskTier,
+        walletAddress: w.address,
+        points: (byWallet.get(w.id) ?? []).map((s) => ({
+          t: s.createdAt,
+          valueSol: s.totalValueSol.toString(),
+          costSol: s.totalCostSol.toString(),
+          unrealizedSol: s.unrealizedSol.toString(),
+          realizedSol: s.realizedSol.toString(),
+        })),
+      }))
+
+      return { success: true, data: { tiers, hours } }
+    } catch (err) {
+      app.log.error(err, 'Failed to get pnl history')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /portfolio/transactions
    * Swap execution history across all the user's sub-wallets.
    */

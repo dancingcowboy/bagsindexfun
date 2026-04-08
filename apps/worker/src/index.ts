@@ -4,6 +4,7 @@ import {
   QUEUE_SCORING,
   QUEUE_ANALYSIS,
   QUEUE_FEE_CLAIM,
+  QUEUE_PRICE_SNAPSHOT,
   FEE_CLAIM_INTERVAL_HOURS,
 } from '@bags-index/shared'
 import { redis } from './queue/redis.js'
@@ -14,6 +15,7 @@ import { createRebalanceWorker } from './workers/rebalance.worker.js'
 import { createBurnWorker } from './workers/burn.worker.js'
 import { createAnalysisWorker } from './workers/analysis.worker.js'
 import { createFeeClaimWorker } from './workers/fee-claim.worker.js'
+import { createPriceSnapshotWorker } from './workers/price-snapshot.worker.js'
 import { startTweetPoller, stopTweetPoller } from './workers/tweet-poller.js'
 
 console.log('[worker] Starting bags-index workers...')
@@ -26,6 +28,7 @@ const rebalanceWorker = createRebalanceWorker()
 const burnWorker = createBurnWorker()
 const analysisWorker = createAnalysisWorker()
 const feeClaimWorker = createFeeClaimWorker()
+const priceSnapshotWorker = createPriceSnapshotWorker()
 
 // Schedule daily scoring at 00:00 UTC
 const scoringQueue = new Queue(QUEUE_SCORING, { connection: redis })
@@ -51,6 +54,14 @@ await feeClaimQueue.upsertJobScheduler(
   { name: 'vault-fee-claim' },
 )
 
+// Schedule hourly price snapshots (for per-vault PnL history charts)
+const priceSnapshotQueue = new Queue(QUEUE_PRICE_SNAPSHOT, { connection: redis })
+await priceSnapshotQueue.upsertJobScheduler(
+  'hourly-price-snapshot',
+  { pattern: '0 * * * *' },
+  { name: 'hourly-price-snapshot' },
+)
+
 // Start the X campaign tweet poller (60s tick, 50min min gap)
 startTweetPoller()
 
@@ -70,6 +81,7 @@ const gracefulShutdown = async () => {
     burnWorker.close(),
     analysisWorker.close(),
     feeClaimWorker.close(),
+    priceSnapshotWorker.close(),
   ])
   await redis.quit()
   process.exit(0)

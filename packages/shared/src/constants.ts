@@ -158,6 +158,10 @@ export const QUEUE_WITHDRAWAL = 'withdrawal-liquidation'
 export const QUEUE_BURN = 'burn'
 export const QUEUE_ANALYSIS = 'analysis'
 export const QUEUE_FEE_CLAIM = 'fee-claim'
+export const QUEUE_PRICE_SNAPSHOT = 'price-snapshot'
+
+/** Wrapped SOL mint — reference for SOL-denominated valuation. */
+export const WSOL_MINT = 'So11111111111111111111111111111111111111112'
 
 /** How often to auto-claim accrued Bags trading fees from the vault wallet */
 export const FEE_CLAIM_INTERVAL_HOURS = 4
