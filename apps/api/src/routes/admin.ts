@@ -7,8 +7,67 @@ import { scoringQueue, rebalanceQueue } from '../queue/queues.js'
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
 
+const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
+
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
+
+  /**
+   * GET /admin/vault — protocol vault holdings, deposits, burns summary.
+   * Admin-only; returns the system:protocol-vault user's sub-wallets,
+   * token holdings, and fee-claim history.
+   */
+  app.get('/vault', async (_req, reply) => {
+    try {
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: {
+          subWallets: { include: { holdings: true } },
+          deposits: { orderBy: { createdAt: 'desc' }, take: 20 },
+        },
+      })
+      if (!user) return { success: true, data: null }
+
+      const totalValueSol = user.subWallets.reduce(
+        (sum, w) => sum + w.holdings.reduce((h, x) => h + Number(x.valueSolEst || 0), 0),
+        0,
+      )
+      const totalClaimedSol = user.deposits.reduce((s, d) => s + Number(d.amountSol || 0), 0)
+      const totalBurnedSol = user.deposits.reduce((s, d) => s + Number(d.feeSol || 0), 0)
+
+      return {
+        success: true,
+        data: {
+          walletAddress: user.walletAddress,
+          subWallets: user.subWallets.map((w) => ({
+            riskTier: w.riskTier,
+            address: w.address,
+            holdings: w.holdings.map((h) => ({
+              tokenMint: h.tokenMint,
+              amount: h.amount.toString(),
+              valueSolEst: h.valueSolEst?.toString() ?? '0',
+            })),
+          })),
+          totals: {
+            totalValueSol: totalValueSol.toFixed(6),
+            totalClaimedSol: totalClaimedSol.toFixed(6),
+            totalBurnedSol: totalBurnedSol.toFixed(6),
+            claimCount: user.deposits.length,
+          },
+          recentClaims: user.deposits.slice(0, 10).map((d) => ({
+            id: d.id,
+            amountSol: Number(d.amountSol).toFixed(6),
+            feeSol: Number(d.feeSol).toFixed(6),
+            createdAt: d.createdAt,
+            status: d.status,
+          })),
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to load vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
 
   /**
    * GET /admin/pnl
