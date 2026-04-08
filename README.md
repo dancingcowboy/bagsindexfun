@@ -156,9 +156,10 @@ Users can withdraw at any time — funds are never pooled. Each tier withdraws i
 
 ### Deflationary Flywheel
 
-- **3% deposit fee / 2% withdrawal fee** (caps the user-visible cost)
-- **60% of every fee → buy and burn** the platform token
-- **40% → staking rewards pool** (future: hold platform tokens to reduce fees)
+- **3% of every deposit** → buys back and burns $BAGSX
+- **2% of every withdrawal** → buys back and burns $BAGSX
+- **Auto-claimed Bags fee revenue** flows through the same pipeline as a deposit into the protocol's own vault, so the 3% burn fires on protocol earnings too
+- **100% of the fee goes to buy-and-burn** — no staking pool, no split, no side pot
 - Burn worker is isolated: **a failed burn never blocks a deposit or withdrawal**. Stuck fees retry next cycle. Every burn is recorded in `BurnRecord` with the tx signatures for `tokensBought` and `tokensBurned`.
 
 ### Rug Protection
@@ -173,9 +174,9 @@ Users can withdraw at any time — funds are never pooled. Each tier withdraws i
 ```
 bags-index/
 ├── apps/
-│   ├── web/        # Next.js 14 — landing page + dashboard
-│   ├── api/        # Fastify — REST API with JWT auth
-│   └── worker/     # BullMQ — scoring, rebalance, burns, AI analysis
+│   ├── web/        # Next.js 15 — landing page + dashboard
+│   ├── api/        # Fastify — REST API with HttpOnly cookie JWT auth
+│   └── worker/     # BullMQ — scoring, AI review, rebalance, burns, fee-claim
 ├── packages/
 │   ├── db/         # Prisma schema + client
 │   ├── shared/     # Types, constants, Zod schemas
@@ -199,7 +200,7 @@ Funds never pool. Each user gets a personal sub-wallet via [Privy Server Wallets
 - **Bags API** — token discovery + native swaps
 - **Helius** — holder counts (DAS API), market data
 - **Privy** — wallet auth + non-custodial server wallets
-- **Claude AI** — daily market analysis agent (via Claude Max)
+- **Claude AI** — autonomous safety-review agent on every scoring cycle
 - **Solana** — mainnet-beta
 
 ## Local Development
@@ -250,8 +251,9 @@ Any token launched on Bags can route a slice of trading fees directly into a Bag
 - **New launches**: include the vault address in your initial `claimersArray` when calling `POST /fee-share/config`.
 - **Existing tokens**: your fee admin calls `POST /fee-share/admin/update-config` to add the vault to `claimersArray` / `basisPointsArray` at any time. Adoption is not gated to launch time.
 - 1–100 claimers supported, BPS must sum to 10000.
-- Each registered project gets a per-tier vault, a 30-day withdrawal timelock (proof of treasury commitment), and a public leaderboard slot at `/projects`.
+- Each registered project gets a BALANCED-tier vault and a public leaderboard slot at `/projects`.
 - Register via `POST /projects` (rate-limited 5/min/IP). Real authorization is on-chain: without the fee admin's signature, no fees flow.
+- Auto-claimed fee SOL is routed through the same deposit pipeline as any user deposit, so the 3% $BAGSX burn fires on every claim.
 
 ## Environment Variables
 
@@ -259,15 +261,17 @@ See [`.env.example`](.env.example) for all required variables with inline docume
 
 ## Security
 
-- Auth check on every route (Privy JWT verification)
+- Auth check on every route (Privy JWT verification, HttpOnly cookie sessions)
 - Ownership validation on all user-scoped queries
-- Redis-backed rate limiting (100 req/min global, 20 req/min auth)
+- Redis-backed rate limiting (100 req/min global and on `/auth`)
 - Generic error messages to clients; real errors server-side only
 - No private keys in database (Privy HSM)
 - On-chain verification before crediting deposits
 - Max 5% slippage cap on all swaps
-- Admin routes gated by wallet whitelist
+- Admin routes gated by wallet whitelist + server-side `isAdmin` check
+- `/admin` and `/dashboard` gated at the middleware layer by the auth cookie
 - Audit log for all state-changing operations
+- Passed a 20-point pre-launch security audit
 
 ## License
 
