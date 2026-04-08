@@ -1,4 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+
+/** Dummy for backwards-compat with callers that still pass an auth header. */
+export function authHeaders(): Record<string, string> {
+  return {}
+}
 
 class ApiClient {
   // Token is held in an HttpOnly cookie set by the API on /auth/login.

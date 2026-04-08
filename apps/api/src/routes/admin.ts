@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 import { blacklistTokenSchema, RISK_TIERS, TWEET_PLAN } from '@bags-index/shared'
 import { requireAdmin } from '../middleware/auth.js'
-import { scoringQueue, rebalanceQueue } from '../queue/queues.js'
+import { scoringQueue, rebalanceQueue, priceSnapshotQueue } from '../queue/queues.js'
 
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
@@ -11,6 +11,21 @@ const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
 
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin)
+
+  /**
+   * POST /admin/trigger-price-snapshot — enqueue an immediate price snapshot.
+   * Useful to seed initial data so the PnL chart isn't empty before the
+   * first :00 UTC cron tick.
+   */
+  app.post('/trigger-price-snapshot', async (_req, reply) => {
+    try {
+      const job = await priceSnapshotQueue.add('manual-snapshot', {})
+      return { success: true, jobId: job.id }
+    } catch (err) {
+      app.log.error(err, 'Failed to enqueue price snapshot')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
 
   /**
    * GET /admin/vault — protocol vault holdings, deposits, burns summary.

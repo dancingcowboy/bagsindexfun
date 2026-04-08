@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getJupiterPrices } from '@bags-index/solana'
+import { getDexVolumes, getMintDecimalsBatch, getJupiterPrices } from '@bags-index/solana'
 import { QUEUE_PRICE_SNAPSHOT, WSOL_MINT } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -8,62 +8,72 @@ import { redis } from '../queue/redis.js'
  * Hourly price-snapshot worker.
  *
  * For every SubWallet with at least one Holding:
- *   1. Fetch current USD prices for all held mints + wrapped SOL
- *   2. Recalculate `Holding.valueSolEst` from live prices
- *   3. Write a `PnlSnapshot` row (totalValueSol + cost basis aggregates)
+ *   1. Fetch current USD prices from DexScreener (more reliable for low-cap
+ *      Bags tokens than Jupiter). Falls back to Jupiter for anything missing.
+ *   2. Resolve token decimals in a single batch RPC call.
+ *   3. Recalculate `Holding.valueSolEst` from live prices.
+ *   4. Write a `PnlSnapshot` row per wallet.
  *
  * Runs on a BullMQ repeatable every hour. Snapshot history drives the
  * per-vault PnL line chart in the dashboard.
  */
-async function processSnapshot(_job: Job) {
+export async function processSnapshot(_job?: Job) {
   const started = Date.now()
   const logger = { info: console.log, error: console.error }
   logger.info('[price-snapshot] starting cycle')
 
-  // 1. Collect every wallet + holding
-  const wallets = await db.subWallet.findMany({
-    include: { holdings: true },
-  })
+  const wallets = await db.subWallet.findMany({ include: { holdings: true } })
   const activeWallets = wallets.filter((w) => w.holdings.length > 0)
   if (activeWallets.length === 0) {
     logger.info('[price-snapshot] no wallets with holdings — skipping')
-    return
+    return { snapshotsWritten: 0 }
   }
 
-  // 2. Unique mint set (plus wSOL for the SOL→USD conversion)
+  // Unique mint set (plus wSOL for the SOL→USD reference price)
   const mints = new Set<string>([WSOL_MINT])
   for (const w of activeWallets) for (const h of w.holdings) mints.add(h.tokenMint)
+  const mintList = [...mints]
 
-  // 3. Fetch prices
-  const prices = await getJupiterPrices([...mints])
-  const solUsd = prices.get(WSOL_MINT)?.usdPrice
+  // Prices: DexScreener first, Jupiter fallback for anything missing
+  const dex = await getDexVolumes(mintList)
+  const missing = mintList.filter((m) => !(dex.get(m)?.priceUsd))
+  const jup = missing.length ? await getJupiterPrices(missing) : new Map()
+
+  const priceUsdByMint = new Map<string, number>()
+  for (const [m, v] of dex) if (v.priceUsd > 0) priceUsdByMint.set(m, v.priceUsd)
+  for (const [m, v] of jup) if (!priceUsdByMint.has(m) && v.usdPrice > 0) priceUsdByMint.set(m, v.usdPrice)
+
+  const solUsd = priceUsdByMint.get(WSOL_MINT)
   if (!solUsd || solUsd <= 0) {
     logger.error('[price-snapshot] no SOL/USD price — aborting')
-    return
+    return { snapshotsWritten: 0 }
   }
+
+  // Decimals in one batched RPC call
+  const decimals = await getMintDecimalsBatch(mintList.filter((m) => m !== WSOL_MINT))
 
   let updatedHoldings = 0
   let snapshotsWritten = 0
   let mintsMissing = 0
 
-  // 4. Process each wallet
   for (const wallet of activeWallets) {
     let totalValueSol = 0
     let totalCostSol = 0
     let realizedSol = 0
 
     for (const h of wallet.holdings) {
-      const info = prices.get(h.tokenMint)
-      if (!info) {
-        // No Jupiter route — keep previous value, don't zero it out
+      const priceUsd = priceUsdByMint.get(h.tokenMint)
+      const dec = decimals.get(h.tokenMint)
+      if (!priceUsd || dec === undefined) {
         mintsMissing++
+        // Preserve prior value instead of zeroing out
         totalValueSol += Number(h.valueSolEst ?? 0)
         totalCostSol += Number(h.costBasisSol ?? 0)
         realizedSol += Number(h.realizedPnlSol ?? 0)
         continue
       }
-      const whole = Number(h.amount) / 10 ** info.decimals
-      const valueSol = (whole * info.usdPrice) / solUsd
+      const whole = Number(h.amount) / 10 ** dec
+      const valueSol = (whole * priceUsd) / solUsd
       totalValueSol += valueSol
       totalCostSol += Number(h.costBasisSol ?? 0)
       realizedSol += Number(h.realizedPnlSol ?? 0)
@@ -93,6 +103,7 @@ async function processSnapshot(_job: Job) {
   logger.info(
     `[price-snapshot] done in ${ms}ms — wallets=${snapshotsWritten} holdings=${updatedHoldings} missing=${mintsMissing} SOL/USD=${solUsd.toFixed(3)}`,
   )
+  return { snapshotsWritten, updatedHoldings, mintsMissing }
 }
 
 export function createPriceSnapshotWorker() {

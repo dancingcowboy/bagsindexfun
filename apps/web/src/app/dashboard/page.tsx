@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
+import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 
 export default function DashboardPage() {
   const { authenticated, ready, logout, user } = usePrivy()
@@ -182,6 +183,16 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+        </motion.div>
+
+        {/* PnL History Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="mb-8"
+        >
+          <PnlHistoryChart />
         </motion.div>
 
         {/* Pool PnL */}
