@@ -372,6 +372,94 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * POST /admin/vault/reconcile — sync DB holdings to on-chain balances.
+   *
+   * DB `Holding.amount` is tracked optimistically from swap quote outAmounts,
+   * which can drift from reality (slippage, partial fills, external sends,
+   * rounding). This endpoint fetches actual SPL balances from Helius for
+   * the protocol vault wallet and rewrites the holdings rows to match:
+   *   - existing holding + on-chain balance → update amount
+   *   - holding with zero on-chain balance → delete
+   *   - on-chain balance with no holding row → insert (valueSolEst=0 until
+   *     the next price-snapshot tick computes it)
+   *
+   * Safe to call anytime. Cost basis and realized PnL are preserved.
+   */
+  app.post('/vault/reconcile', async (_req, reply) => {
+    try {
+      const { getTokenBalances } = await import('@bags-index/solana')
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: { include: { holdings: true } } },
+      })
+      if (!user || user.subWallets.length === 0) {
+        return reply.status(404).send({ error: 'Protocol vault not initialized' })
+      }
+      const vault = user.subWallets[0]
+
+      const chain = (await getTokenBalances(vault.address)) as {
+        tokens?: Array<{ mint: string; amount: number | string; decimals: number }>
+      }
+      const onChain = new Map<string, bigint>()
+      for (const t of chain.tokens ?? []) {
+        const raw = typeof t.amount === 'string' ? BigInt(t.amount) : BigInt(Math.floor(t.amount))
+        if (raw > 0n) onChain.set(t.mint, raw)
+      }
+
+      let updated = 0
+      let deleted = 0
+      let inserted = 0
+      const dbByMint = new Map(vault.holdings.map((h) => [h.tokenMint, h]))
+
+      // Update or delete existing rows
+      for (const h of vault.holdings) {
+        const onChainAmt = onChain.get(h.tokenMint) ?? 0n
+        if (onChainAmt === 0n) {
+          await db.holding.delete({ where: { id: h.id } })
+          deleted++
+        } else if (onChainAmt !== h.amount) {
+          await db.holding.update({
+            where: { id: h.id },
+            data: { amount: onChainAmt },
+          })
+          updated++
+        }
+      }
+
+      // Insert new rows for mints present on-chain but missing in DB
+      for (const [mint, amt] of onChain) {
+        if (dbByMint.has(mint)) continue
+        await db.holding.create({
+          data: {
+            subWalletId: vault.id,
+            tokenMint: mint,
+            amount: amt,
+            valueSolEst: '0',
+            costBasisSol: '0',
+          },
+        })
+        inserted++
+      }
+
+      await db.auditLog.create({
+        data: {
+          action: 'VAULT_RECONCILE',
+          resource: `subwallet:${vault.id}`,
+          metadata: { updated, deleted, inserted, onChainMints: onChain.size },
+        },
+      })
+
+      return {
+        success: true,
+        data: { updated, deleted, inserted, onChainMints: onChain.size },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to reconcile vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * POST /admin/vault/switch — switch the protocol vault to a different tier.
    * Body: { toTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN' }
    * Enqueues a vault-switch job that smart-delta-rebalances the vault sub-wallet
