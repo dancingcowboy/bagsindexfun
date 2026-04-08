@@ -17,11 +17,13 @@ import { redis } from '../queue/redis.js'
 import { postTweet } from '../lib/twitter.js'
 import { mirrorTweetToTelegram } from '../lib/telegram.js'
 
+/** BAGSX has 9 decimals. Format raw base units as a human-readable token amount. */
+const BAGSX_DECIMALS = 9
 function formatTokens(n: bigint): string {
-  // Display in millions/thousands with 2-decimal precision; raw lamports otherwise
-  const num = Number(n) / 1e6
-  if (num >= 1) return `${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}M`
-  return n.toString()
+  const whole = Number(n) / 10 ** BAGSX_DECIMALS
+  if (whole >= 1_000_000) return `${(whole / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}M`
+  if (whole >= 1_000) return `${(whole / 1_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}K`
+  return whole.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
 interface BurnJobData {
