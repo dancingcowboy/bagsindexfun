@@ -104,10 +104,11 @@ app.addHook('onResponse', async (req, reply) => {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-// Auth — stricter rate limit (20 req/min)
+// Auth — rate limit (100 req/min). AuthBridge fires login+logout on every
+// Privy state change so the budget needs headroom for normal usage.
 await app.register(async (scoped) => {
   await scoped.register(rateLimit, {
-    max: 20,
+    max: 100,
     timeWindow: '1 minute',
     redis,
     keyGenerator: (req) => req.ip,
