@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getBagsSolValue } from '@bags-index/solana'
+import { getBagsSolValue, getMintDecimalsBatch } from '@bags-index/solana'
 import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -95,6 +95,37 @@ export async function processSnapshot(_job?: Job) {
       },
     })
     snapshotsWritten++
+  }
+
+  // ─── Per-token price samples ──────────────────────────────────────────
+  // Collect unique mints currently held, quote "1 whole token → SOL" for
+  // each, and store one TokenPriceSnapshot row per mint. Drives the
+  // per-token line chart on user/admin dashboards.
+  try {
+    const uniqueMints = new Set<string>()
+    for (const w of activeWallets) for (const h of w.holdings) uniqueMints.add(h.tokenMint)
+    const mintList = [...uniqueMints]
+    if (mintList.length > 0) {
+      const decimals = await getMintDecimalsBatch(mintList)
+      let priceWrites = 0
+      for (const mint of mintList) {
+        const dec = decimals.get(mint)
+        if (dec === undefined) continue
+        // One whole token in base units
+        const probe = (10n ** BigInt(dec)).toString()
+        const lamports = await getBagsSolValue(mint, probe)
+        if (lamports === null) continue
+        const priceSol = Number(lamports) / LAMPORTS_PER_SOL
+        await db.tokenPriceSnapshot.create({
+          data: { tokenMint: mint, priceSol: priceSol.toFixed(12) },
+        })
+        priceWrites++
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      logger.info(`[price-snapshot] wrote ${priceWrites} token price samples`)
+    }
+  } catch (err) {
+    logger.error(`[price-snapshot] per-token sampling failed: ${err}`)
   }
 
   const ms = Date.now() - started

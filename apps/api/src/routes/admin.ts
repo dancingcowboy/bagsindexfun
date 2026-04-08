@@ -74,6 +74,71 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /admin/vault-token-price-history?hours=168
+   * Per-token SOL price history for the protocol vault's current holdings.
+   * Admin-gated. Mirrors the shape of /portfolio/token-price-history.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/vault-token-price-history', async (req, reply) => {
+    try {
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: { include: { holdings: { select: { tokenMint: true } } } } },
+      })
+      if (!user) return { success: true, data: { tokens: [], hours } }
+
+      const mints = new Set<string>()
+      for (const w of user.subWallets) for (const h of w.holdings) mints.add(h.tokenMint)
+      if (mints.size === 0) return { success: true, data: { tokens: [], hours } }
+
+      const scores = await db.tokenScore.findMany({
+        where: { tokenMint: { in: [...mints] } },
+        orderBy: { scoredAt: 'desc' },
+        select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+      })
+      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      for (const s of scores) {
+        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+      }
+
+      const samples = await db.tokenPriceSnapshot.findMany({
+        where: { tokenMint: { in: [...mints] }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'asc' },
+        select: { tokenMint: true, priceSol: true, createdAt: true },
+      })
+
+      const byMint = new Map<string, typeof samples>()
+      for (const s of samples) {
+        const arr = byMint.get(s.tokenMint) ?? []
+        arr.push(s)
+        byMint.set(s.tokenMint, arr)
+      }
+
+      const tokens = [...mints].map((mint) => {
+        const series = byMint.get(mint) ?? []
+        const base = series.length > 0 ? Number(series[0].priceSol) : 0
+        return {
+          tokenMint: mint,
+          tokenSymbol: metaByMint.get(mint)?.symbol ?? null,
+          tokenName: metaByMint.get(mint)?.name ?? null,
+          points: series.map((p) => ({
+            t: p.createdAt,
+            priceSol: p.priceSol.toString(),
+            indexed: base > 0 ? (Number(p.priceSol) / base) * 100 : 100,
+          })),
+        }
+      })
+
+      return { success: true, data: { tokens, hours } }
+    } catch (err) {
+      app.log.error(err, 'Failed to load vault token price history')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * POST /admin/trigger-price-snapshot — enqueue an immediate price snapshot.
    * Useful to seed initial data so the PnL chart isn't empty before the
    * first :00 UTC cron tick.

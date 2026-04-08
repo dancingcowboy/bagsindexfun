@@ -170,6 +170,73 @@ export async function portfolioRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /portfolio/token-price-history?hours=168
+   * Per-token SOL price history (one sample per hour) for every token the
+   * authenticated user currently holds. Each series is normalized to base
+   * 100 at the first sample so lines are comparable across tokens.
+   * Ownership scoped: only mints present in the user's wallets.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/token-price-history', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const wallets = await db.subWallet.findMany({
+        where: { userId },
+        include: { holdings: { select: { tokenMint: true } } },
+      })
+      const mints = new Set<string>()
+      for (const w of wallets) for (const h of w.holdings) mints.add(h.tokenMint)
+      if (mints.size === 0) return { success: true, data: { tokens: [], hours } }
+
+      // Resolve symbol/name via most recent TokenScore
+      const scores = await db.tokenScore.findMany({
+        where: { tokenMint: { in: [...mints] } },
+        orderBy: { scoredAt: 'desc' },
+        select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+      })
+      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      for (const s of scores) {
+        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+      }
+
+      const samples = await db.tokenPriceSnapshot.findMany({
+        where: { tokenMint: { in: [...mints] }, createdAt: { gte: since } },
+        orderBy: { createdAt: 'asc' },
+        select: { tokenMint: true, priceSol: true, createdAt: true },
+      })
+
+      const byMint = new Map<string, typeof samples>()
+      for (const s of samples) {
+        const arr = byMint.get(s.tokenMint) ?? []
+        arr.push(s)
+        byMint.set(s.tokenMint, arr)
+      }
+
+      const tokens = [...mints].map((mint) => {
+        const series = byMint.get(mint) ?? []
+        const base = series.length > 0 ? Number(series[0].priceSol) : 0
+        return {
+          tokenMint: mint,
+          tokenSymbol: metaByMint.get(mint)?.symbol ?? null,
+          tokenName: metaByMint.get(mint)?.name ?? null,
+          points: series.map((p) => ({
+            t: p.createdAt,
+            priceSol: p.priceSol.toString(),
+            indexed: base > 0 ? (Number(p.priceSol) / base) * 100 : 100,
+          })),
+        }
+      })
+
+      return { success: true, data: { tokens, hours } }
+    } catch (err) {
+      app.log.error(err, 'Failed to get token price history')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /portfolio/transactions
    * Swap execution history across all the user's sub-wallets.
    */

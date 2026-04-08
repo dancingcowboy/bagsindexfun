@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
+import { TokenPriceChart } from '@/components/TokenPriceChart'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -631,6 +632,12 @@ export default function AdminPage() {
                   endpoint="/admin/vault-pnl-history"
                   title="Protocol Vault PnL"
                   subtitle="Hourly snapshots of the system vault — value in SOL per tier"
+                />
+
+                <TokenPriceChart
+                  endpoint="/admin/vault-token-price-history"
+                  title="Vault Token Performance"
+                  subtitle="Per-token hourly prices · normalized to 100 at range start"
                 />
 
                 <Panel title="Vault Wallet">

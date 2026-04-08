@@ -61,6 +61,23 @@ model Holding {
   @@map("holdings")
 }
 
+/**
+ * Hourly per-token price sample in SOL.
+ * Written by the price-snapshot worker alongside PnlSnapshot. Drives the
+ * per-token line chart on user/admin dashboards. `priceSol` is the SOL
+ * value of one whole token (i.e. `10^decimals` base units) quoted via
+ * Bags /trade/quote against wSOL.
+ */
+model TokenPriceSnapshot {
+  id        String   @id @default(cuid())
+  tokenMint String   @map("token_mint")
+  priceSol  Decimal  @map("price_sol") @db.Decimal(28, 12)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tokenMint, createdAt])
+  @@map("token_price_snapshots")
+}
+
 model PnlSnapshot {
   id             String   @id @default(cuid())
   subWalletId    String   @map("sub_wallet_id")
