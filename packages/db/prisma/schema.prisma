@@ -1,0 +1,376 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Users & Wallets ────────────────────────────────────────────────────────
+
+model User {
+  id            String       @id @default(cuid())
+  privyUserId   String       @unique @map("privy_user_id")
+  walletAddress String       @unique @map("wallet_address")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  lastSeenAt    DateTime     @default(now()) @map("last_seen_at")
+  subWallets    SubWallet[]
+  deposits      Deposit[]
+  withdrawals   Withdrawal[]
+
+  @@map("users")
+}
+
+/**
+ * One sub-wallet per user per tier. A user who opts into Conservative
+ * and Degen has two separate Privy wallets holding two separate baskets,
+ * each rebalanced on its own cadence. Holdings never mix across tiers.
+ */
+model SubWallet {
+  id            String          @id @default(cuid())
+  userId        String          @map("user_id")
+  privyWalletId String          @unique @map("privy_wallet_id")
+  address       String          @unique
+  riskTier      RiskTier        @map("risk_tier")
+  realizedPnlSol Decimal        @default(0) @map("realized_pnl_sol") @db.Decimal(20, 9)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  user          User            @relation(fields: [userId], references: [id])
+  holdings      Holding[]
+  executions    SwapExecution[]
+
+  @@unique([userId, riskTier])
+  @@index([riskTier])
+  @@map("sub_wallets")
+}
+
+model Holding {
+  id              String    @id @default(cuid())
+  subWalletId     String    @map("sub_wallet_id")
+  tokenMint       String    @map("token_mint")
+  amount          BigInt
+  valueSolEst     Decimal   @map("value_sol_est") @db.Decimal(20, 9)
+  costBasisSol    Decimal   @default(0) @map("cost_basis_sol") @db.Decimal(20, 9)
+  totalBoughtSol  Decimal   @default(0) @map("total_bought_sol") @db.Decimal(20, 9)
+  totalSoldSol    Decimal   @default(0) @map("total_sold_sol") @db.Decimal(20, 9)
+  realizedPnlSol  Decimal   @default(0) @map("realized_pnl_sol") @db.Decimal(20, 9)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  subWallet       SubWallet @relation(fields: [subWalletId], references: [id])
+
+  @@unique([subWalletId, tokenMint])
+  @@map("holdings")
+}
+
+model PnlSnapshot {
+  id             String   @id @default(cuid())
+  subWalletId    String   @map("sub_wallet_id")
+  totalValueSol  Decimal  @map("total_value_sol") @db.Decimal(20, 9)
+  totalCostSol   Decimal  @map("total_cost_sol") @db.Decimal(20, 9)
+  realizedSol    Decimal  @map("realized_sol") @db.Decimal(20, 9)
+  unrealizedSol  Decimal  @map("unrealized_sol") @db.Decimal(20, 9)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([subWalletId, createdAt])
+  @@map("pnl_snapshots")
+}
+
+/**
+ * Project-owned vault, funded by a Bags fee-share claimer slot.
+ *
+ * A project launching a token on Bags adds this vault's `vaultAddress` to
+ * their `POST /fee-share/config` `claimersArray` with a `feeShareBps` slice
+ * (e.g. 500 = 5% of trading fees). Bags routes the fees on-chain. The
+ * allocation worker treats incoming SOL exactly like a user deposit: it
+ * auto-allocates across the current top-10 for the chosen tier.
+ *
+ * Holdings live in the Holding table via a hidden SubWallet stand-in.
+ * Withdrawals follow the timelock policy (hackathon default: 30 days).
+ */
+model ProjectVault {
+  id               String   @id @default(cuid())
+  /** Source token mint on Bags — the token whose fees fund this vault */
+  sourceTokenMint  String   @unique @map("source_token_mint")
+  sourceSymbol     String   @map("source_symbol")
+  sourceName       String   @map("source_name")
+  sourceImageUrl   String?  @map("source_image_url")
+  /** Address the project added to their Bags fee-share claimersArray */
+  vaultAddress     String   @unique @map("vault_address")
+  /** Privy Server Wallet ID backing vaultAddress */
+  privyWalletId    String   @unique @map("privy_wallet_id")
+  /** BPS of the token's trading fees routed here (0–10000) */
+  feeShareBps      Int      @map("fee_share_bps")
+  /** Risk tier this vault auto-allocates into */
+  riskTier         RiskTier @map("risk_tier")
+  /** Wallet authorized to withdraw (typically the token creator) */
+  ownerWallet      String   @map("owner_wallet")
+  /** Twitter/website for the source project — displayed on leaderboard */
+  twitter          String?
+  website          String?
+  /** Earliest withdrawal time (set at registration). Default: 30d timelock. */
+  unlocksAt        DateTime @map("unlocks_at")
+  /** Lifetime SOL received from the Bags fee stream */
+  totalSolReceived Decimal  @default(0) @map("total_sol_received") @db.Decimal(20, 9)
+  /** Current estimated vault value in SOL (snapshot, refreshed on rebalance) */
+  currentValueSol  Decimal  @default(0) @map("current_value_sol") @db.Decimal(20, 9)
+  createdAt        DateTime @default(now()) @map("created_at")
+  lastFundedAt     DateTime? @map("last_funded_at")
+
+  @@index([riskTier])
+  @@index([createdAt])
+  @@map("project_vaults")
+}
+
+// ─── Deposits & Withdrawals ─────────────────────────────────────────────────
+
+enum TxStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  PARTIAL
+}
+
+enum RiskTier {
+  CONSERVATIVE
+  BALANCED
+  DEGEN
+}
+
+
+model Deposit {
+  id          String      @id @default(cuid())
+  userId      String      @map("user_id")
+  riskTier    RiskTier    @map("risk_tier")
+  amountSol   Decimal     @map("amount_sol") @db.Decimal(20, 9)
+  feeSol      Decimal     @map("fee_sol") @db.Decimal(20, 9)
+  txSignature String?     @map("tx_signature")
+  status      TxStatus    @default(PENDING)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  confirmedAt DateTime?   @map("confirmed_at")
+  user        User        @relation(fields: [userId], references: [id])
+  burnTx      BurnRecord?
+
+  @@index([userId])
+  @@index([riskTier])
+  @@map("deposits")
+}
+
+model Withdrawal {
+  id          String      @id @default(cuid())
+  userId      String      @map("user_id")
+  riskTier    RiskTier    @map("risk_tier")
+  amountSol   Decimal     @map("amount_sol") @db.Decimal(20, 9)
+  feeSol      Decimal     @map("fee_sol") @db.Decimal(20, 9)
+  txSignature String?     @map("tx_signature")
+  status      TxStatus    @default(PENDING)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  confirmedAt DateTime?   @map("confirmed_at")
+  user        User        @relation(fields: [userId], references: [id])
+  burnTx      BurnRecord?
+
+  @@index([userId])
+  @@index([riskTier])
+  @@map("withdrawals")
+}
+
+// ─── Scoring ────────────────────────────────────────────────────────────────
+
+model ScoringCycle {
+  id              String           @id @default(cuid())
+  startedAt       DateTime         @default(now()) @map("started_at")
+  completedAt     DateTime?        @map("completed_at")
+  tokenCount      Int              @default(0) @map("token_count")
+  status          String           @default("RUNNING")
+  scores          TokenScore[]
+  rebalanceCycles RebalanceCycle[]
+
+  @@map("scoring_cycles")
+}
+
+model TokenScore {
+  id              String       @id @default(cuid())
+  cycleId         String       @map("cycle_id")
+  riskTier        RiskTier     @map("risk_tier")
+  tokenMint       String       @map("token_mint")
+  tokenSymbol     String       @map("token_symbol")
+  tokenName       String       @map("token_name")
+  volume24h       Decimal      @map("volume_24h") @db.Decimal(20, 2)
+  holderCount     Int          @map("holder_count")
+  holderGrowthPct Decimal      @map("holder_growth_pct") @db.Decimal(10, 4)
+  priceUsd        Decimal      @map("price_usd") @db.Decimal(20, 8)
+  liquidityUsd    Decimal      @map("liquidity_usd") @db.Decimal(20, 2)
+  compositeScore  Decimal      @map("composite_score") @db.Decimal(10, 4)
+  rank            Int
+  isBlacklisted   Boolean      @default(false) @map("is_blacklisted")
+  /** Layer-A agent safety review: PASS | REMOVED | null (not reviewed) */
+  safetyVerdict   String?      @map("safety_verdict")
+  safetyReason    String?      @map("safety_reason")
+  scoredAt        DateTime     @default(now()) @map("scored_at")
+  cycle           ScoringCycle @relation(fields: [cycleId], references: [id])
+
+  @@unique([cycleId, riskTier, tokenMint])
+  @@index([cycleId, riskTier, rank])
+  @@map("token_scores")
+}
+
+// ─── Rebalancing ────────────────────────────────────────────────────────────
+
+model RebalanceCycle {
+  id              String          @id @default(cuid())
+  scoringCycleId  String          @map("scoring_cycle_id")
+  riskTier        RiskTier        @map("risk_tier")
+  startedAt       DateTime        @default(now()) @map("started_at")
+  completedAt     DateTime?       @map("completed_at")
+  status          String          @default("PENDING")
+  walletsTotal    Int             @default(0) @map("wallets_total")
+  walletsComplete Int             @default(0) @map("wallets_complete")
+  walletsFailed   Int             @default(0) @map("wallets_failed")
+  shuffleSeed     String          @map("shuffle_seed")
+  scoringCycle    ScoringCycle    @relation(fields: [scoringCycleId], references: [id])
+  executions      SwapExecution[]
+
+  @@unique([scoringCycleId, riskTier])
+  @@index([riskTier, startedAt])
+  @@map("rebalance_cycles")
+}
+
+model SwapExecution {
+  id               String          @id @default(cuid())
+  rebalanceCycleId String?         @map("rebalance_cycle_id")
+  subWalletId      String          @map("sub_wallet_id")
+  inputMint        String          @map("input_mint")
+  outputMint       String          @map("output_mint")
+  inputAmount      BigInt          @map("input_amount")
+  outputAmount     BigInt?         @map("output_amount")
+  slippageBps      Int             @map("slippage_bps")
+  txSignature      String?         @map("tx_signature")
+  status           TxStatus        @default(PENDING)
+  errorMessage     String?         @map("error_message")
+  retryCount       Int             @default(0) @map("retry_count")
+  executedAt       DateTime        @default(now()) @map("executed_at")
+  confirmedAt      DateTime?       @map("confirmed_at")
+  rebalanceCycle   RebalanceCycle? @relation(fields: [rebalanceCycleId], references: [id])
+  subWallet        SubWallet       @relation(fields: [subWalletId], references: [id])
+
+  @@index([rebalanceCycleId])
+  @@index([subWalletId])
+  @@map("swap_executions")
+}
+
+// ─── Burns ──────────────────────────────────────────────────────────────────
+
+model BurnRecord {
+  id                String      @id @default(cuid())
+  depositId         String?     @unique @map("deposit_id")
+  withdrawalId      String?     @unique @map("withdrawal_id")
+  platformTokenMint String      @map("platform_token_mint")
+  tokensBought      BigInt      @map("tokens_bought")
+  tokensBurned      BigInt      @map("tokens_burned")
+  solSpent          Decimal     @map("sol_spent") @db.Decimal(20, 9)
+  buyTxSig          String?     @map("buy_tx_sig")
+  burnTxSig         String?     @map("burn_tx_sig")
+  tweetId           String?     @map("tweet_id")
+  status            TxStatus    @default(PENDING)
+  createdAt         DateTime    @default(now()) @map("created_at")
+  deposit           Deposit?    @relation(fields: [depositId], references: [id])
+  withdrawal        Withdrawal? @relation(fields: [withdrawalId], references: [id])
+
+  @@map("burn_records")
+}
+
+// ─── Admin ──────────────────────────────────────────────────────────────────
+
+model TokenBlacklist {
+  id        String   @id @default(cuid())
+  tokenMint String   @unique @map("token_mint")
+  reason    String
+  addedBy   String   @map("added_by")
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  @@map("token_blacklist")
+}
+
+// ─── AI Analysis ────────────────────────────────────────────────────────────
+
+model AnalysisCycle {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now()) @map("created_at")
+  status       String   @default("RUNNING")
+  model        String   @default("claude-sonnet-4-20250514")
+  promptTokens Int      @default(0) @map("prompt_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  durationMs   Int      @default(0) @map("duration_ms")
+
+  // Raw market data fed to the agent
+  marketDataJson Json?  @map("market_data_json")
+
+  // Agent's full reasoning (thinking process, visible on website)
+  reasoning    String   @db.Text
+
+  // Final allocation decisions
+  allocations  AnalysisAllocation[]
+
+  // Summary for display
+  summary      String   @db.Text
+  sentiment    String   @default("neutral") // bullish, bearish, neutral, cautious
+  keyInsights  String[] @map("key_insights")
+
+  @@map("analysis_cycles")
+}
+
+model AnalysisAllocation {
+  id              String        @id @default(cuid())
+  analysisCycleId String        @map("analysis_cycle_id")
+  tier            RiskTier      @default(BALANCED)
+  tokenMint       String        @map("token_mint")
+  tokenSymbol     String        @map("token_symbol")
+  tokenName       String        @map("token_name")
+  weightPct       Decimal       @map("weight_pct") @db.Decimal(5, 2)
+  reasoning       String        @db.Text
+  confidence      String        @default("medium") // high, medium, low
+  signals         String[]      // e.g. ["volume_surge", "holder_growth", "whale_accumulation"]
+  analysisCycle   AnalysisCycle @relation(fields: [analysisCycleId], references: [id])
+
+  @@unique([analysisCycleId, tier, tokenMint])
+  @@index([analysisCycleId, tier])
+  @@map("analysis_allocations")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  action    String
+  resource  String
+  metadata  Json?
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("audit_log")
+}
+
+// ─── X (Twitter) Campaign ───────────────────────────────────────────────────
+
+/**
+ * Pre-written tweets for the bags-index launch campaign.
+ * The tweet-poller worker scans every 60s for status=ACTIVE tweets whose
+ * scheduledAt has passed and posts them via the twitter-api-v2 client.
+ *
+ * imageUrl: an Unsplash photo URL (or any public URL). The poster downloads
+ * it just-in-time, uploads to Twitter media, and attaches to the tweet.
+ */
+model Tweet {
+  id            String    @id @default(cuid())
+  text          String
+  imageUrl      String?   @map("image_url")
+  imageAlt      String?   @map("image_alt")
+  scheduledAt   DateTime  @map("scheduled_at")
+  status        String    @default("DRAFT") // DRAFT | ACTIVE | SENT | FAILED
+  twitterId     String?   @map("twitter_id")
+  sentAt        DateTime? @map("sent_at")
+  errorMessage  String?   @map("error_message")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, scheduledAt])
+  @@map("tweets")
+}

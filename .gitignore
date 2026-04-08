@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+.next/
+.turbo/
+
+# env
+.env
+.env.local
+.env.production
+
+# db
+packages/db/prisma/migrations/
+
+# ide
+.vscode/
+.idea/
+
+# os
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+deploy.sh

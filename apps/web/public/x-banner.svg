@@ -1,0 +1,66 @@
+<svg width="1500" height="500" viewBox="0 0 1500 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#000000"/>
+      <stop offset="50%" stop-color="#031a08"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00D62B" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#00ff66"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00D62B" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#00D62B" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="indexLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7CFFB0"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="4"/></filter>
+  </defs>
+
+  <rect width="1500" height="500" fill="url(#bg)"/>
+
+  <!-- subtle grid -->
+  <g stroke="#0d2a14" stroke-width="1">
+    <line x1="0" y1="125" x2="1500" y2="125"/>
+    <line x1="0" y1="250" x2="1500" y2="250"/>
+    <line x1="0" y1="375" x2="1500" y2="375"/>
+  </g>
+
+  <!-- faded background tokens (other charts) -->
+  <g opacity="0.25" stroke="#3a8a4a" stroke-width="2" fill="none">
+    <path d="M0 380 C 150 360, 300 410, 450 340 S 750 420, 900 360 S 1200 300, 1500 350"/>
+    <path d="M0 320 C 200 300, 350 360, 500 280 S 800 380, 1000 290 S 1300 360, 1500 300"/>
+    <path d="M0 420 C 180 400, 320 440, 480 380 S 780 460, 980 400 S 1280 440, 1500 410"/>
+    <path d="M0 280 C 220 240, 380 320, 540 230 S 840 320, 1040 250 S 1340 300, 1500 260"/>
+  </g>
+
+  <!-- INDEX line area fill -->
+  <path d="M0 360 C 150 340, 300 380, 450 300 S 750 350, 900 240 S 1200 180, 1500 110 L 1500 500 L 0 500 Z" fill="url(#fill)"/>
+  <!-- INDEX line stroke (highlighted) -->
+  <path d="M0 360 C 150 340, 300 380, 450 300 S 750 350, 900 240 S 1200 180, 1500 110"
+        stroke="url(#indexLine)" stroke-width="6" fill="none" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M0 360 C 150 340, 300 380, 450 300 S 750 350, 900 240 S 1200 180, 1500 110"
+        stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+  <!-- INDEX label tag -->
+  <g transform="translate(1280 80)">
+    <rect x="0" y="0" width="180" height="42" rx="21" fill="#00D62B"/>
+    <text x="90" y="28" font-family="Inter, system-ui, sans-serif" font-size="20" font-weight="800" fill="#000" text-anchor="middle" letter-spacing="2">BAGS INDEX</text>
+  </g>
+
+  <!-- Headline -->
+  <g transform="translate(70 160)">
+    <text font-family="Inter, system-ui, sans-serif" font-size="78" font-weight="900" fill="#FFFFFF" letter-spacing="-2">
+      The Index Fund
+    </text>
+    <text y="86" font-family="Inter, system-ui, sans-serif" font-size="78" font-weight="900" letter-spacing="-2" xml:space="preserve">
+      <tspan fill="#FFFFFF">for </tspan><tspan fill="#00D62B" dx="10">Bags.</tspan>
+    </text>
+    <text y="150" font-family="Inter, system-ui, sans-serif" font-size="24" font-weight="500" fill="#9ad6a8" letter-spacing="0.5">
+      Deposit SOL · Auto-allocate top 10 · Daily rebalance · Burn the bag
+    </text>
+  </g>
+</svg>

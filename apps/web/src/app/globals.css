@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Bags Index — aligned with Bags.fm brand (green primary, dark bg, openRunde-inspired) */
+  --color-bg-primary: #0c0c0c;
+  --color-bg-secondary: #141414;
+  --color-bg-card: #1a1a1a;
+  --color-bg-hover: #222222;
+  --color-bg-elevated: #252525;
+
+  --color-border: #2a2a2a;
+  --color-border-subtle: #1f1f1f;
+
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #cfcfcf;
+  --color-text-muted: #8f8f8f;
+
+  /* Bags green as primary */
+  --color-accent: #00D62B;
+  --color-accent-hover: #00b824;
+  --color-accent-subtle: rgba(0, 214, 43, 0.12);
+  --color-accent-glow: rgba(0, 214, 43, 0.25);
+
+  --color-green: #00D62B;
+  --color-green-subtle: rgba(0, 214, 43, 0.12);
+  --color-red: #ff4444;
+  --color-red-subtle: rgba(255, 68, 68, 0.12);
+  --color-orange: #ff8c00;
+  --color-orange-subtle: rgba(255, 140, 0, 0.12);
+  --color-yellow: #ffd000;
+  --color-pink: #ff69b4;
+
+  /* Chart line colors — 10 distinct tokens + 1 ETF aggregate */
+  --color-chart-1: #00D62B;
+  --color-chart-2: #00b8ff;
+  --color-chart-3: #ff8c00;
+  --color-chart-4: #ff69b4;
+  --color-chart-5: #ffd000;
+  --color-chart-6: #a855f7;
+  --color-chart-7: #14b8a6;
+  --color-chart-8: #f43f5e;
+  --color-chart-9: #6366f1;
+  --color-chart-10: #84cc16;
+  --color-chart-etf: #ffffff;
+
+  --font-display: 'DM Sans', system-ui, sans-serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 999px;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: var(--color-accent-subtle);
+    color: var(--color-accent);
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+  }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: #000;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-full);
+    font-weight: 600;
+    transition: all 0.2s;
+    &:hover {
+      background: var(--color-accent-hover);
+      box-shadow: 0 0 20px var(--color-accent-glow);
+    }
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border);
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-full);
+    font-weight: 500;
+    transition: all 0.2s;
+    &:hover {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-text-secondary);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    transition: all 0.15s;
+    &:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-hover);
+    }
+  }
+
+  .badge-green {
+    background: var(--color-green-subtle);
+    color: var(--color-green);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .badge-red {
+    background: var(--color-red-subtle);
+    color: var(--color-red);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .glow-green {
+    box-shadow: 0 0 30px var(--color-accent-glow), 0 0 60px rgba(0, 214, 43, 0.08);
+  }
+}

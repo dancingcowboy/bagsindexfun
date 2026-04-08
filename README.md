@@ -1,0 +1,221 @@
+# bags index
+
+An AI-powered, non-custodial index vault on Solana built for the [Bags](https://bags.fm) ecosystem.
+
+Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every deposit and withdrawal burns the platform token.
+
+## How It Works
+
+### The Three Risk Tiers
+
+Each user gets **one sub-wallet per tier** — you can deposit into any combination. The tiers do not share tokens or holdings; each runs its own universe filter, its own scoring weights, and its own rebalance schedule.
+
+| Tier | Universe filter | Scoring weights | SOL anchor | Rebalance |
+|------|-----------------|------------------|------------|-----------|
+| **Conservative** | ≥ $250k liquidity, ≥ 500 holders, ≥ 14d old, vol₇d ≤ 0.6 | 0.25 vol · 0.25 growth · **0.50 liq** | **20% SOL** | every **24h** |
+| **Balanced** | ≥ $50k liquidity, ≥ 100 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 0% | every **12h** |
+| **Degen** | ≥ $20k liquidity, ≥ 50 holders, ≥ 1d old, **≤ 30d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 0% | every **4h** |
+
+A token can appear in more than one tier, but the filters and weights make each basket behave very differently: Conservative is "SOL + the boring winners", Degen is "fresh momentum with velocity."
+
+### Scoring (Layer 0 → Layer A)
+
+Scoring runs daily and produces three independent top-10 baskets. Each pass has two layers:
+
+**Layer 0 — Quant.** Deterministic, auditable. For every candidate token in the tier's universe, the worker normalizes three signals and computes a composite:
+
+```
+composite = w_volume    · (volume24h     / maxVolume)
+          + w_growth    · (holderGrowth  / maxGrowth)      ← blend: 40% 24h + 60% 7d
+          + w_liquidity · (liquidityUsd  / maxLiquidity)
+```
+
+- **Holder growth blend** — 60% weight on 7-day, 40% on 24h. Catches both fresh momentum and sustained traction while smoothing single-day noise.
+- **Wash-trade sanity filter** — if volume-per-unique-trader exceeds 10× the median, the token's volume component is penalized by 0.25. Filters pump wallets hitting the same pool.
+- **Minimum unique traders 24h** — 25, filters out dead tokens that would otherwise rank on stale liquidity.
+
+**Layer A — AI Safety Review.** The top-(N+5) candidates are sent one-by-one to Claude with a strict contract: **the agent can only mark a token `PASS` or `REMOVED`**. It cannot add tokens and it cannot reorder. For each token it returns a one-line reason which is:
+- stored on `TokenScore.safety_verdict` / `safety_reason`
+- written to `AuditLog` with the cycleId + tier
+- rendered as a badge on the landing page ("✓ AI Pass — LP locked 12mo, holders dispersed")
+
+The reviewer flags obvious rug patterns (dev wallet concentration, unlocked LP, live mint authority, top-10 holder >60%), sudden holder/liquidity drains, symbol impersonation, and known exploit chatter. **It fails open** — if Claude is unreachable or returns garbage, the token passes with the error logged in the reason, so a proxy outage never silently empties the index.
+
+After review, the first 10 survivors become the index for that tier; removed tokens are persisted with `rank = 0` so the UI can show "why rejected" for transparency.
+
+### Rebalance Execution
+
+Each tier has its own rebalance queue and its own cadence. Scoring only enqueues a rebalance if the tier's top-N actually changed **and** at least `REBALANCE_MIN_RANK_CHANGES = 2` positions flipped (prevents fee bleed from noisy boundary tokens).
+
+When a rebalance fires:
+
+1. **Create cycle** with a cryptographic random seed (`crypto.randomBytes(32)`). Seed is persisted so the entire shuffle is reproducible and auditable.
+2. **Load all active sub-wallets** for that tier (only wallets with holdings).
+3. **Fisher-Yates shuffle** with a seeded PRNG — so no wallet is systematically first or last in line. Fair execution order across cycles.
+4. **Per wallet, compute deltas**: for each current holding, `diff = currentWeight - targetWeight`. If `diff > 2%`, queue a sell of the excess. Then for each target token, if `targetWeight - currentWeight > 2%`, queue a buy for the shortfall. The 2% band prevents micro-shuffling fees.
+5. **Execute sequentially** (concurrency=1 per wallet) via the Bags native swap endpoint. Each swap is signed by the user's Privy Server Wallet (HSM) — zero keys in our DB.
+6. **Record every execution** in `SwapExecution` with `inputMint`, `outputMint`, amounts, slippageBps, txSignature. Failed swaps are logged; the cycle continues with the next wallet.
+7. **Crash-safe**: progress (`walletsComplete`, `walletsFailed`) is persisted after each wallet, so a killed worker resumes cleanly.
+
+### Deposit Flow
+
+```
+User picks tier → POST /deposits { riskTier, amountSol }
+      ↓
+API resolves the user's sub-wallet via (userId, riskTier) compound key
+Returns { depositId, subWalletAddress, netAmountSol }
+      ↓
+User signs SOL transfer via Privy → POST /deposits/:id/confirm { txSignature }
+      ↓
+API verifies on-chain, marks CONFIRMED, enqueues two jobs:
+      ├─ deposit-allocation → buy the tier's current top-10 with netSol − 0.01 reserve
+      └─ burn → swap fee SOL to platform token → SPL burn instruction
+      ↓
+Allocation worker loads latestCycle.scores filtered by riskTier:
+  for each score: weight = composite / totalComposite
+                  solForToken = allocatableSol × weight
+                  build buy via Bags, sign via Privy, submit, update holdings
+      ↓
+Burn worker: if platform token has liquidity, swap + burn.
+            If not, hold the fee SOL in escrow and retry next cycle.
+            Never blocks the user.
+```
+
+### Withdrawal Flow
+
+```
+POST /withdrawals { riskTier }
+      ↓
+API looks up the user's sub-wallet for that tier, checks it has holdings,
+estimates totalValueSol and feeSol, creates a Withdrawal row (PENDING),
+enqueues liquidation.
+      ↓
+Withdrawal worker:
+  - for each holding: build sell via Bags, sign via Privy, submit
+  - on partial failure: sell what you can, mark PARTIAL, keep stragglers
+  - transfer resulting SOL (net of 2% fee) to the user's connected wallet
+  - enqueue burn job for the fee share
+      ↓
+Withdrawal marked COMPLETED (or PARTIAL with a list of stuck tokens)
+```
+
+Users can withdraw at any time — funds are never pooled. Each tier withdraws independently.
+
+### Deflationary Flywheel
+
+- **3% deposit fee / 2% withdrawal fee** (caps the user-visible cost)
+- **60% of every fee → buy and burn** the platform token
+- **40% → staking rewards pool** (future: hold platform tokens to reduce fees)
+- Burn worker is isolated: **a failed burn never blocks a deposit or withdrawal**. Stuck fees retry next cycle. Every burn is recorded in `BurnRecord` with the tx signatures for `tokensBought` and `tokensBurned`.
+
+### Rug Protection
+
+- Tokens losing > 20% holders in 4h → auto-ejected and added to `TokenBlacklist`
+- Universe filter enforces per-tier minimum liquidity and holder floors (see table above)
+- Layer-A AI review catches dev concentration, LP not locked, live mint authority, impersonation
+- Manual admin blacklist for confirmed rugs (admin routes gated by `ADMIN_WALLETS`)
+
+## Architecture
+
+```
+bags-index/
+├── apps/
+│   ├── web/        # Next.js 14 — landing page + dashboard
+│   ├── api/        # Fastify — REST API with JWT auth
+│   └── worker/     # BullMQ — scoring, rebalance, burns, AI analysis
+├── packages/
+│   ├── db/         # Prisma schema + client
+│   ├── shared/     # Types, constants, Zod schemas
+│   └── solana/     # Bags API client, Helius integration, swap execution
+└── infra/
+    └── docker/     # Postgres + Redis for local dev
+```
+
+### Non-Custodial Design
+
+Funds never pool. Each user gets a personal sub-wallet via [Privy Server Wallets](https://docs.privy.io/guide/server-wallets/) — HSM-backed signing with zero private keys in our database. Users can withdraw at any time.
+
+### Rug Protection
+
+- Tokens losing >20% holders in 4 hours → auto-ejected from index
+- Minimum $50K liquidity required for inclusion
+- Manual admin blacklist for confirmed rugs
+
+## Tech Stack
+
+- **Bags API** — token discovery + native swaps
+- **Helius** — holder counts (DAS API), market data
+- **Privy** — wallet auth + non-custodial server wallets
+- **Claude AI** — daily market analysis agent (via Claude Max)
+- **Solana** — mainnet-beta
+
+## Local Development
+
+```bash
+# Prerequisites: Node 22+, pnpm, Docker
+
+# Start Postgres + Redis
+docker compose -f infra/docker/docker-compose.yml up -d
+
+# Install dependencies
+pnpm install
+
+# Set up environment
+cp .env.example .env
+# Fill in: PRIVY_APP_ID, HELIUS_API_KEY, BAGS_API_KEY
+
+# Generate Prisma client + push schema
+pnpm --filter @bags-index/db run generate
+pnpm --filter @bags-index/db exec prisma db push
+
+# Run all apps
+pnpm dev
+```
+
+Web runs on `localhost:3002`, API on `localhost:3001`.
+
+## Deployment
+
+```bash
+# First time (sets up nginx, SSL, DB, PM2)
+bash deploy.sh setup
+
+# Ongoing deploys
+git push && bash deploy.sh deploy
+
+# Other commands
+bash deploy.sh status          # PM2 status
+bash deploy.sh logs web        # View web logs
+bash deploy.sh logs api        # View API logs
+bash deploy.sh restart worker  # Restart worker only
+```
+
+## For Projects (Bags App primitive)
+
+Any token launched on Bags can route a slice of trading fees directly into a Bags Index vault using the native Bags fee-share primitive — no middleman, no manual routing.
+
+- **New launches**: include the vault address in your initial `claimersArray` when calling `POST /fee-share/config`.
+- **Existing tokens**: your fee admin calls `POST /fee-share/admin/update-config` to add the vault to `claimersArray` / `basisPointsArray` at any time. Adoption is not gated to launch time.
+- 1–100 claimers supported, BPS must sum to 10000.
+- Each registered project gets a per-tier vault, a 30-day withdrawal timelock (proof of treasury commitment), and a public leaderboard slot at `/projects`.
+- Register via `POST /projects` (rate-limited 5/min/IP). Real authorization is on-chain: without the fee admin's signature, no fees flow.
+
+## Environment Variables
+
+See [`.env.example`](.env.example) for all required variables with inline documentation.
+
+## Security
+
+- Auth check on every route (Privy JWT verification)
+- Ownership validation on all user-scoped queries
+- Redis-backed rate limiting (100 req/min global, 20 req/min auth)
+- Generic error messages to clients; real errors server-side only
+- No private keys in database (Privy HSM)
+- On-chain verification before crediting deposits
+- Max 5% slippage cap on all swaps
+- Admin routes gated by wallet whitelist
+- Audit log for all state-changing operations
+
+## License
+
+MIT
