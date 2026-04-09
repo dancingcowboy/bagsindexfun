@@ -13,6 +13,7 @@
     "@privy-io/react-auth": "^2.4.0",
     "@solana/web3.js": "^1.98.0",
     "@tanstack/react-query": "^5.62.0",
+    "bs58": "^6.0.0",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.468.0",
     "next": "^15.1.0",
