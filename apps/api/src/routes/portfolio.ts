@@ -282,16 +282,41 @@ export async function portfolioRoutes(app: FastifyInstance) {
         }),
       )
 
+      // Cost basis per tier = net user cashflow (deposits − withdrawals).
+      // The holdings.costBasisSol column only tracks the portion that
+      // actually got swapped into tokens, so it understates cost whenever
+      // capInputToLiquidity leaves part of the deposit sitting as native
+      // SOL in the sub-wallet — that native SOL is still the user's money.
+      const [depositRows, withdrawalRows] = await Promise.all([
+        db.deposit.groupBy({
+          by: ['riskTier'],
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          _sum: { amountSol: true },
+        }),
+        db.withdrawal.groupBy({
+          by: ['riskTier'],
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          _sum: { amountSol: true },
+        }),
+      ])
+      const netDepositedByTier = new Map<string, number>()
+      for (const d of depositRows) netDepositedByTier.set(d.riskTier, Number(d._sum.amountSol ?? 0))
+      for (const w of withdrawalRows) {
+        netDepositedByTier.set(
+          w.riskTier,
+          (netDepositedByTier.get(w.riskTier) ?? 0) - Number(w._sum.amountSol ?? 0),
+        )
+      }
+
       const tiers = wallets.map((w) => {
         const currentValue =
           liveByWallet.get(w.id) ??
           w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
-        const costBasis = w.holdings.reduce((s, h) => s + Number(h.costBasisSol), 0)
+        const costBasis = netDepositedByTier.get(w.riskTier) ?? 0
         const realized = Number(w.realizedPnlSol)
         const unrealized = currentValue - costBasis
         const totalPnl = realized + unrealized
-        const invested = w.holdings.reduce((s, h) => s + Number(h.totalBoughtSol), 0)
-        const pnlPct = invested > 0 ? (totalPnl / invested) * 100 : 0
+        const pnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0
         return {
           riskTier: w.riskTier,
           walletAddress: w.address,
