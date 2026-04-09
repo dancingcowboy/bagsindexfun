@@ -4,7 +4,49 @@ import { db } from '@bags-index/db'
 /**
  * Public routes — no auth required. Exposes index composition.
  */
+// Scoring cadence per tier — must match apps/worker/src/index.ts scheduler.
+// Rebalance is reactive (fires after scoring if composition changed), so
+// "next cycle" here means the next scoring run per tier.
+const HOUR_MS = 60 * 60 * 1000
+const MIN_MS = 60 * 1000
+const TIER_INTERVAL_MS: Record<'CONSERVATIVE' | 'BALANCED' | 'DEGEN', number> = {
+  DEGEN: 4 * HOUR_MS + 23 * MIN_MS,
+  BALANCED: 12 * HOUR_MS + 8 * MIN_MS,
+  CONSERVATIVE: 23 * HOUR_MS + 23 * MIN_MS,
+}
+
 export async function indexInfoRoutes(app: FastifyInstance) {
+  /**
+   * GET /index/schedule
+   * Per-tier last-scored and next-scheduled cycle times. Powers the
+   * dashboard countdown so users can see when their vault will next be
+   * rescored (and potentially rebalanced).
+   */
+  app.get('/schedule', async (_req, reply) => {
+    try {
+      const tiers = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
+      const rows = await Promise.all(
+        tiers.map(async (tier) => {
+          const last = await db.scoringCycle.findFirst({
+            where: { status: 'COMPLETED', tier, completedAt: { not: null } },
+            orderBy: { completedAt: 'desc' },
+            select: { completedAt: true },
+          })
+          const intervalMs = TIER_INTERVAL_MS[tier]
+          const lastScoredAt = last?.completedAt ?? null
+          const nextScoringAt = lastScoredAt
+            ? new Date(lastScoredAt.getTime() + intervalMs)
+            : null
+          return { tier, lastScoredAt, nextScoringAt, intervalMs }
+        }),
+      )
+      return { success: true, data: rows }
+    } catch (err) {
+      app.log.error(err, 'Failed to get index schedule')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
   /**
    * GET /index/current
    * Current top 10 tokens with scores and weights.

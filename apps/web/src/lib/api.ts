@@ -133,6 +133,17 @@ class ApiClient {
     return this.fetch<{ data: any[] }>('/index/history')
   }
 
+  getIndexSchedule() {
+    return this.fetch<{
+      data: Array<{
+        tier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+        lastScoredAt: string | null
+        nextScoringAt: string | null
+        intervalMs: number
+      }>
+    }>('/index/schedule')
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')
