@@ -164,7 +164,6 @@ model Deposit {
   createdAt   DateTime    @default(now()) @map("created_at")
   confirmedAt DateTime?   @map("confirmed_at")
   user        User        @relation(fields: [userId], references: [id])
-  burnTx      BurnRecord?
 
   @@index([userId])
   @@index([riskTier])
@@ -182,7 +181,6 @@ model Withdrawal {
   createdAt   DateTime    @default(now()) @map("created_at")
   confirmedAt DateTime?   @map("confirmed_at")
   user        User        @relation(fields: [userId], references: [id])
-  burnTx      BurnRecord?
 
   @@index([userId])
   @@index([riskTier])
@@ -277,29 +275,6 @@ model SwapExecution {
   @@map("swap_executions")
 }
 
-// ─── Burns ──────────────────────────────────────────────────────────────────
-
-model BurnRecord {
-  id                String      @id @default(cuid())
-  depositId         String?     @unique @map("deposit_id")
-  withdrawalId      String?     @unique @map("withdrawal_id")
-  switchJobId       String?     @unique @map("switch_job_id")
-  platformTokenMint String      @map("platform_token_mint")
-  tokensBought      BigInt      @map("tokens_bought")
-  tokensBurned      BigInt      @map("tokens_burned")
-  solSpent          Decimal     @map("sol_spent") @db.Decimal(20, 9)
-  buyTxSig          String?     @map("buy_tx_sig")
-  burnTxSig         String?     @map("burn_tx_sig")
-  tweetId           String?     @map("tweet_id")
-  status            TxStatus    @default(PENDING)
-  createdAt         DateTime    @default(now()) @map("created_at")
-  deposit           Deposit?    @relation(fields: [depositId], references: [id])
-  withdrawal        Withdrawal? @relation(fields: [withdrawalId], references: [id])
-  switchJob         SwitchJob?  @relation(fields: [switchJobId], references: [id])
-
-  @@map("burn_records")
-}
-
 // ─── Tier Switching ─────────────────────────────────────────────────────────
 
 /**
@@ -331,7 +306,6 @@ model SwitchJob {
   errorMessage       String?     @map("error_message")
   createdAt          DateTime    @default(now()) @map("created_at")
   completedAt        DateTime?   @map("completed_at")
-  burnRecord         BurnRecord?
 
   @@index([userId])
   @@index([status])

@@ -133,10 +133,6 @@ class ApiClient {
     return this.fetch<{ data: any[] }>('/index/history')
   }
 
-  getBurnStats() {
-    return this.fetch<{ data: any }>('/index/burns')
-  }
-
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')

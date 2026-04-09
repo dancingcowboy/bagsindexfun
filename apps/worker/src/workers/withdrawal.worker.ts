@@ -8,16 +8,12 @@ import {
 } from '@bags-index/solana'
 import {
   QUEUE_WITHDRAWAL,
-  QUEUE_BURN,
   SOL_MINT,
   LAMPORTS_PER_SOL,
   WALLET_RESERVE_SOL,
 } from '@bags-index/shared'
-import { Queue } from 'bullmq'
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
-
-const burnQueue = new Queue(QUEUE_BURN, { connection: redis })
 
 interface WithdrawalJobData {
   withdrawalId: string
@@ -117,16 +113,15 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     },
   })
 
-  // Transfer recovered SOL (minus protocol fee and gas reserve) to the user's
-  // connected wallet. The fee stays on the sub-wallet for the burn worker to
-  // pick up; gas reserve stays so the wallet can pay future tx fees.
+  // Transfer recovered SOL (minus gas reserve) to the user's connected wallet.
+  // No protocol fee — vault value is 100% the user's. Gas reserve stays so
+  // the wallet can pay future tx fees.
   let transferSig: string | null = null
   try {
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user) throw new Error(`User ${userId} not found`)
-    const feeLamports = BigInt(Math.floor(Number(withdrawal.feeSol) * LAMPORTS_PER_SOL))
     const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
-    const sendable = totalRecoveredLamports - feeLamports - reserveLamports
+    const sendable = totalRecoveredLamports - reserveLamports
     if (sendable > 0n) {
       transferSig = await transferSolFromServerWallet({
         fromPrivyWalletId: subWallet.privyWalletId,
@@ -157,12 +152,6 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   } catch (err) {
     logger.error(`[withdrawal] reconcile failed: ${err}`)
   }
-
-  // Enqueue burn for the fee
-  await burnQueue.add('burn-withdrawal-fee', {
-    withdrawalId,
-    feeSol: withdrawal.feeSol.toString(),
-  })
 
   logger.info(
     `[withdrawal] Liquidation ${status} for ${withdrawalId}: recovered ${totalRecoveredLamports} lamports, ${failedTokens} failures`

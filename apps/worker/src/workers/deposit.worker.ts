@@ -8,6 +8,8 @@ import {
   LAMPORTS_PER_SOL,
   SOL_MINT,
   TIER_SCORING_CONFIG,
+  BAGSX_MINT,
+  BAGSX_WEIGHT_PCT,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
@@ -42,12 +44,14 @@ async function processDeposit(job: Job<DepositJobData>) {
   }
 
   const netSol = Number(deposit.amountSol) - Number(deposit.feeSol)
-  // Keep the hard gas reserve out of everything, THEN apply the tier's SOL
-  // anchor (e.g. CONSERVATIVE keeps an extra 20% as native SOL for stability).
+  // Reserve gas, then split the remainder: tier SOL anchor stays native,
+  // BAGSX_WEIGHT_PCT buys $BAGSX, the rest is allocated across scored tokens.
   const tierCfg = TIER_SCORING_CONFIG[deposit.riskTier as keyof typeof TIER_SCORING_CONFIG]
   const anchorPct = tierCfg?.solAnchorPct ?? 0
   const postReserve = netSol - WALLET_RESERVE_SOL
-  const allocatableSol = postReserve > 0 ? postReserve * (1 - anchorPct / 100) : 0
+  const bagsxSol = postReserve > 0 ? postReserve * (BAGSX_WEIGHT_PCT / 100) : 0
+  const allocatableSol =
+    postReserve > 0 ? postReserve * (1 - anchorPct / 100 - BAGSX_WEIGHT_PCT / 100) : 0
   if (allocatableSol <= 0) {
     logger.info(`[deposit] Net amount too small to allocate after reserve`)
     return
@@ -76,6 +80,60 @@ async function processDeposit(job: Job<DepositJobData>) {
     (sum, s) => sum + Number(s.compositeScore),
     0
   )
+
+  // Buy the fixed BAGSX slice first (same pipeline — recorded as a holding
+  // and rebalanced identically to any other position).
+  if (bagsxSol > 0) {
+    const bagsxLamports = BigInt(Math.floor(bagsxSol * LAMPORTS_PER_SOL))
+    try {
+      const capped = await capInputToLiquidity(BAGSX_MINT, bagsxLamports)
+      const solForBagsx = Number(capped) / LAMPORTS_PER_SOL
+      const { txBytes, quote } = await buildBuyTransaction({
+        tokenMint: BAGSX_MINT,
+        solAmount: capped,
+        userPublicKey: subWallet.address,
+      })
+      const signed = await signVersionedTxBytes({
+        walletId: subWallet.privyWalletId,
+        txBytes,
+      })
+      const sig = await submitAndConfirmDirect(signed)
+      await db.swapExecution.create({
+        data: {
+          subWalletId: subWallet.id,
+          inputMint: SOL_MINT,
+          outputMint: BAGSX_MINT,
+          inputAmount: capped,
+          outputAmount: BigInt(quote.outAmount),
+          slippageBps: quote.slippageBps,
+          status: 'CONFIRMED',
+          txSignature: sig,
+        },
+      })
+      await db.holding.upsert({
+        where: {
+          subWalletId_tokenMint: { subWalletId: subWallet.id, tokenMint: BAGSX_MINT },
+        },
+        update: {
+          amount: { increment: BigInt(quote.outAmount) },
+          valueSolEst: { increment: solForBagsx },
+          costBasisSol: { increment: solForBagsx },
+          totalBoughtSol: { increment: solForBagsx },
+        },
+        create: {
+          subWalletId: subWallet.id,
+          tokenMint: BAGSX_MINT,
+          amount: BigInt(quote.outAmount),
+          valueSolEst: solForBagsx,
+          costBasisSol: solForBagsx,
+          totalBoughtSol: solForBagsx,
+        },
+      })
+      logger.info(`[deposit] Bought BAGSX slice: ${solForBagsx.toFixed(4)} SOL`)
+    } catch (err) {
+      logger.error(`[deposit] Failed to buy BAGSX slice: ${err}`)
+    }
+  }
 
   // Execute swaps sequentially (avoid nonce conflicts)
   for (const score of latestCycle.scores) {

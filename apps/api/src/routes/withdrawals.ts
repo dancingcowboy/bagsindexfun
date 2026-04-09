@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { createWithdrawalSchema, WITHDRAWAL_FEE_BPS } from '@bags-index/shared'
+import { createWithdrawalSchema } from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
-import { withdrawalQueue, burnQueue } from '../queue/queues.js'
+import { withdrawalQueue } from '../queue/queues.js'
 
 export async function withdrawalRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth)
@@ -31,8 +31,10 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         (sum, h) => sum + Number(h.valueSolEst),
         0
       )
-      const feeSol = (totalValueSol * WITHDRAWAL_FEE_BPS) / 10_000
-      const netSol = totalValueSol - feeSol
+      // No withdrawal fee — user receives 100% of vault value (the BAGSX
+      // slice is sold alongside every other holding by the worker).
+      const feeSol = 0
+      const netSol = totalValueSol
 
       const withdrawal = await db.withdrawal.create({
         data: {

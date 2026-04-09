@@ -7,7 +7,7 @@ import {
   getDexVolumes,
   getLiveHoldings,
 } from '@bags-index/solana'
-import { SOL_MINT } from '@bags-index/shared'
+import { SOL_MINT, BAGSX_MINT } from '@bags-index/shared'
 import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -118,6 +118,10 @@ export async function processSnapshot(_job?: Job) {
       select: { tokenMint: true },
     })
     for (const s of recentScores) uniqueMints.add(s.tokenMint)
+
+    // Always sample the platform token ($BAGSX) — every vault holds 8%
+    // exposure to it, so the chart needs a continuous price series.
+    uniqueMints.add(BAGSX_MINT)
 
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {

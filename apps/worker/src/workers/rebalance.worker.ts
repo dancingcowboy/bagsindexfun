@@ -14,6 +14,8 @@ import {
   SOL_MINT,
   LAMPORTS_PER_SOL,
   TIER_SCORING_CONFIG,
+  BAGSX_MINT,
+  BAGSX_WEIGHT_PCT,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { postRebalanceAnnouncement } from '../lib/rebalance-tweet.js'
@@ -214,7 +216,10 @@ async function processSingleWallet(
 
   const riskTier = cycle.riskTier
   const tierCfg = TIER_SCORING_CONFIG[riskTier as keyof typeof TIER_SCORING_CONFIG]
-  const anchorScale = 1 - (tierCfg?.solAnchorPct ?? 0) / 100
+  // Every vault holds a fixed BAGSX slice. Scored tokens share the rest,
+  // minus the tier's SOL anchor.
+  const bagsxWeight = BAGSX_WEIGHT_PCT / 100
+  const anchorScale = 1 - (tierCfg?.solAnchorPct ?? 0) / 100 - bagsxWeight
   const scoresForTier = cycle.scoringCycle.scores.filter((s) => s.riskTier === riskTier)
   const totalScore = scoresForTier.reduce((sum, s) => sum + Number(s.compositeScore), 0)
   if (totalScore <= 0) {
@@ -222,12 +227,14 @@ async function processSingleWallet(
     await bumpAndMaybeFinish(cycle.id, true, logger, cycle.scoringCycleId)
     return
   }
-  const targetWeights = new Map(
+  const targetWeights = new Map<string, number>(
     scoresForTier.map((s) => [
       s.tokenMint,
       (Number(s.compositeScore) / totalScore) * anchorScale,
     ]),
   )
+  // Fixed platform-token exposure — identical for user and system vaults.
+  targetWeights.set(BAGSX_MINT, bagsxWeight)
 
   let success = true
   try {

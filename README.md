@@ -2,13 +2,13 @@
 
 An AI-powered, non-custodial index vault on Solana built for the [Bags](https://bags.fm) ecosystem.
 
-Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every deposit and withdrawal burns the platform token.
+Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every vault holds a fixed 8% exposure to $BAGSX, the platform token.
 
 ---
 
 ## Bags Hackathon Submission
 
-**One-liner:** Deposit SOL, get instant exposure to the top 10 performing tokens on Bags, rebalanced daily — fully non-custodial, with a deflationary burn flywheel on every flow and an autonomous Claude agent in the loop.
+**One-liner:** Deposit SOL, get instant exposure to the top 10 performing tokens on Bags, rebalanced daily — fully non-custodial, with a fixed 8% $BAGSX exposure in every vault and an autonomous Claude agent in the loop.
 
 **Categories:** Bags API · Fee Sharing · AI Agents · Claude Skills
 
@@ -20,20 +20,20 @@ bags-index isn't just *built on* Bags — it plugs into the Bags stack in three 
 2. **Native Bags swaps** — every allocation, rebalance, and liquidation routes through `/trade/quote` + `/trade/swap`, signed by Privy and submitted on-chain
 3. **Bags fee sharing** — the protocol registers fee-share vaults on Bags tokens, auto-claims the creator fee split, and routes claimed SOL straight back into the index pipeline
 
-$BAGSX itself is a Bags-launched token, so the flywheel is fully native to the ecosystem.
+$BAGSX itself is a Bags-launched token, so platform-token exposure is fully native to the ecosystem.
 
 ### Autonomous Claude agent
 
 On top of the quant ranking, an **autonomous Claude agent** reviews the candidate set every cycle — reading holder distribution, liquidity depth, recent price action, and on-chain signals to flag rug risk, sanity-check the top 10, and eject tokens that look compromised before they hit user vaults. The quant filter does the ranking; the agent adds a second layer of judgment that a pure formula can't. Every decision is logged for auditability.
 
-### The $BAGSX burn flywheel
+### Every vault holds 8% $BAGSX
 
-A flat rule applies to **every SOL flow** in the system:
-- **3% of every deposit** → buys back and burns $BAGSX
-- **2% of every withdrawal** → buys back and burns $BAGSX
-- **Auto-claimed Bags fee revenue** → flows through the same pipeline as a deposit into the protocol's own vault, so the 3% burn fires on protocol earnings too
+A flat rule applies to **every vault** in the system — user vaults and the protocol's own fee-share vault alike:
+- **8% of every vault** is held in $BAGSX, the platform token
+- **No deposit, withdrawal, or switch fees.** 100% of every deposit is allocated; 100% of every withdrawal returns to the user (BAGSX sold back to SOL alongside the rest of the holdings)
+- **Auto-claimed Bags fee revenue** flows through the same deposit pipeline into the protocol's own vault, so the protocol accumulates more $BAGSX on every claim
 
-More usage → more burns → tighter supply. The token captures value from the vault's own activity.
+As TVL grows, the protocol accumulates more $BAGSX on every deposit and rebalance. The token captures value from the vault's own activity.
 
 ### Fair execution
 
@@ -45,15 +45,15 @@ Every user gets a Privy Server Wallet as their vault sub-wallet. Transactions ar
 
 ### Shipped & verifiable
 
-bags-index is live, not a prototype. The $BAGSX contract is deployed on Bags, the vault is a real Privy Server Wallet with a public address, every deposit, rebalance swap, fee claim, and burn is an on-chain transaction with a signature you can look up. The team wallet, the platform token, and the protocol vault are all publicly verifiable.
+bags-index is live, not a prototype. The $BAGSX contract is deployed on Bags, the vault is a real Privy Server Wallet with a public address, every deposit, rebalance swap, and fee claim is an on-chain transaction with a signature you can look up. The team wallet, the platform token, and the protocol vault are all publicly verifiable.
 
 ### Why it matters for Bags
 
-bags-index turns Bags into an index-investable ecosystem. Instead of picking one token and hoping, users get diversified, rules-based exposure to whatever is actually working on Bags right now — quant-scored, AI-reviewed, and fairly executed — and every dollar that flows through the vault deflates $BAGSX. It's a passive product that makes the whole Bags launchpad more investable, and a flywheel that rewards every trade, deposit, and fee claim.
+bags-index turns Bags into an index-investable ecosystem. Instead of picking one token and hoping, users get diversified, rules-based exposure to whatever is actually working on Bags right now — quant-scored, AI-reviewed, and fairly executed — and every vault holds a fixed 8% slice of $BAGSX, so the protocol accumulates more of the platform token as TVL grows. It's a passive product that makes the whole Bags launchpad more investable.
 
 ### What's next — Bags App Store integration
 
-We'd love to turn bags-index into a standalone app for the **Bags App Store**, so any creator can plug an index vault directly into their own token's fee structure. The standalone version would be **fully configurable**: creators pick their own deposit and withdrawal fees, choose which token to buy back and burn (their own token, $BAGSX, SOL, or anything else), or turn the burn off entirely and route the fee wherever they want. The autonomous Claude agent and the non-custodial Privy architecture come along for the ride.
+We'd love to turn bags-index into a standalone app for the **Bags App Store**, so any creator can plug an index vault directly into their own token's fee structure. The standalone version would be **fully configurable**: creators pick their own platform-token exposure weight (or disable it entirely), and route auto-claimed fees wherever they want. The autonomous Claude agent and the non-custodial Privy architecture come along for the ride.
 
 ---
 
@@ -65,9 +65,9 @@ Each user gets **one sub-wallet per tier** — you can deposit into any combinat
 
 | Tier | Universe filter | Scoring weights | SOL anchor | Rebalance |
 |------|-----------------|------------------|------------|-----------|
-| **Conservative** | ≥ $8k liquidity, ≥ 200 holders, ≥ 5d old, vol₇d ≤ 0.6 | 0.30 vol · 0.40 growth · **0.30 liq** | **20% SOL** | every **24h** |
-| **Balanced** | ≥ $10k liquidity, ≥ 150 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 0% | every **12h** |
-| **Degen** | ≥ $5k liquidity, ≥ 50 holders, **≤ 90d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 0% | every **4h** |
+| **Conservative** | ≥ $8k liquidity, ≥ 200 holders, ≥ 5d old, vol₇d ≤ 0.6 | 0.30 vol · 0.40 growth · **0.30 liq** | **12% SOL + 8% $BAGSX** | every **24h** |
+| **Balanced** | ≥ $10k liquidity, ≥ 150 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 8% $BAGSX | every **12h** |
+| **Degen** | ≥ $5k liquidity, ≥ 50 holders, **≤ 90d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 8% $BAGSX | every **4h** |
 
 A token can appear in more than one tier, but the filters and weights make each basket behave very differently: Conservative is "SOL + the boring winners", Degen is "fresh momentum with velocity."
 
@@ -120,18 +120,13 @@ Returns { depositId, subWalletAddress, netAmountSol }
       ↓
 User signs SOL transfer via Privy → POST /deposits/:id/confirm { txSignature }
       ↓
-API verifies on-chain, marks CONFIRMED, enqueues two jobs:
-      ├─ deposit-allocation → buy the tier's current top-10 with netSol − 0.01 reserve
-      └─ burn → swap fee SOL to platform token → SPL burn instruction
+API verifies on-chain, marks CONFIRMED, enqueues deposit-allocation.
       ↓
 Allocation worker loads latestCycle.scores filtered by riskTier:
-  for each score: weight = composite / totalComposite
+  reserves 8% of the vault for $BAGSX (and, on CONSERVATIVE, a 12% SOL anchor)
+  for each score: weight = composite / totalComposite × (remaining %)
                   solForToken = allocatableSol × weight
                   build buy via Bags, sign via Privy, submit, update holdings
-      ↓
-Burn worker: if platform token has liquidity, swap + burn.
-            If not, hold the fee SOL in escrow and retry next cycle.
-            Never blocks the user.
 ```
 
 ### Withdrawal Flow
@@ -144,23 +139,21 @@ estimates totalValueSol and feeSol, creates a Withdrawal row (PENDING),
 enqueues liquidation.
       ↓
 Withdrawal worker:
-  - for each holding: build sell via Bags, sign via Privy, submit
+  - for each holding (including the $BAGSX slice): build sell via Bags, sign via Privy, submit
   - on partial failure: sell what you can, mark PARTIAL, keep stragglers
-  - transfer resulting SOL (net of 2% fee) to the user's connected wallet
-  - enqueue burn job for the fee share
+  - transfer 100% of resulting SOL to the user's connected wallet — no fees
       ↓
 Withdrawal marked COMPLETED (or PARTIAL with a list of stuck tokens)
 ```
 
 Users can withdraw at any time — funds are never pooled. Each tier withdraws independently.
 
-### Deflationary Flywheel
+### Platform token exposure
 
-- **3% of every deposit** → buys back and burns $BAGSX
-- **2% of every withdrawal** → buys back and burns $BAGSX
-- **Auto-claimed Bags fee revenue** flows through the same pipeline as a deposit into the protocol's own vault, so the 3% burn fires on protocol earnings too
-- **100% of the fee goes to buy-and-burn** — no staking pool, no split, no side pot
-- Burn worker is isolated: **a failed burn never blocks a deposit or withdrawal**. Stuck fees retry next cycle. Every burn is recorded in `BurnRecord` with the tx signatures for `tokensBought` and `tokensBurned`.
+- **Every vault holds a fixed 8% slice of $BAGSX**, user vaults and the protocol vault alike
+- **No deposit, withdrawal, or switch fees** — 100% of every flow goes to the user
+- **Auto-claimed Bags fee revenue** flows through the same deposit pipeline into the protocol's own vault, so the protocol accumulates more $BAGSX every time it claims
+- Withdrawals sell the $BAGSX slice back to SOL alongside every other holding — no special casing
 
 ### Rug Protection
 
@@ -176,7 +169,7 @@ bags-index/
 ├── apps/
 │   ├── web/        # Next.js 15 — landing page + dashboard
 │   ├── api/        # Fastify — REST API with HttpOnly cookie JWT auth
-│   └── worker/     # BullMQ — scoring, AI review, rebalance, burns, fee-claim
+│   └── worker/     # BullMQ — scoring, AI review, rebalance, fee-claim
 ├── packages/
 │   ├── db/         # Prisma schema + client
 │   ├── shared/     # Types, constants, Zod schemas
@@ -253,7 +246,7 @@ Any token launched on Bags can route a slice of trading fees directly into a Bag
 - 1–100 claimers supported, BPS must sum to 10000.
 - Each registered project gets a BALANCED-tier vault and a public leaderboard slot at `/projects`.
 - Register via `POST /projects` (rate-limited 5/min/IP). Real authorization is on-chain: without the fee admin's signature, no fees flow.
-- Auto-claimed fee SOL is routed through the same deposit pipeline as any user deposit, so the 3% $BAGSX burn fires on every claim.
+- Auto-claimed fee SOL is routed through the same deposit pipeline as any user deposit, so the protocol vault grows its $BAGSX slice on every claim.
 
 ## Environment Variables
 

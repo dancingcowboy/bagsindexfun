@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { usePrivy } from '@privy-io/react-auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, RefreshCw, Play, Users, Coins, Flame, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Play, Users, Coins, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
@@ -37,7 +37,6 @@ interface Overview {
       tierBreakdown: { tier: string; deposits: number; totalSol: string; feeSol: string }[]
     }
     withdrawals: { total: number; totalSol: string; totalFeeSol: string }
-    burns: { total: number; solSpent: string }
     projectVaults: { total: number; totalSolReceived: string; currentValueSol: string }
     blacklist: { count: number }
     capacity: {
@@ -123,7 +122,6 @@ interface VaultData {
     tokenValueSol?: string
     nativeSol?: string
     totalClaimedSol: string
-    totalBurnedSol: string
     claimCount: number
   }
   recentClaims: {
@@ -344,11 +342,10 @@ export default function AdminPage() {
             ) : (
               <div className="space-y-6">
                 {/* Top KPIs */}
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
                   <Stat icon={<Users className="h-4 w-4" />} label="Users" value={o.users.total.toString()} sub={`+${o.users.new24h} 24h · +${o.users.new7d} 7d`} />
                   <Stat icon={<Coins className="h-4 w-4" />} label="Total Deposited" value={`${fmt(o.deposits.totalSol)} SOL`} sub={`${o.deposits.total} deposits · ${o.deposits.count24h} in 24h`} />
                   <Stat icon={<Activity className="h-4 w-4" />} label="Fees Collected" value={`${fmt(Number(o.deposits.totalFeeSol) + Number(o.withdrawals.totalFeeSol))} SOL`} sub={`${fmt(o.deposits.totalFeeSol)} deposit · ${fmt(o.withdrawals.totalFeeSol)} withdrawal`} />
-                  <Stat icon={<Flame className="h-4 w-4" />} label="Tokens Burned" value={`${fmt(o.burns.solSpent)} SOL`} sub={`${o.burns.total} burns`} />
                 </div>
 
                 {/* Per-tier capacity vs ceiling. Ceiling = batch_size × tier_interval_h.
@@ -715,59 +712,12 @@ export default function AdminPage() {
                 </div>
                 {(() => {
                   const t = vault.data.data.totals
-                  const claimed = Number(t.totalClaimedSol)
-                  const burned = Number(t.totalBurnedSol)
-                  const current = Number(t.totalValueSol)
-                  // Expected "retained" after buy-and-burn: claimed - burned.
-                  // Anything below that is market drawdown on tier holdings;
-                  // anything above is upside on tier holdings.
-                  const retained = claimed - burned
-                  const marketPnl = current - retained
-                  const marketPnlPct = retained > 0 ? (marketPnl / retained) * 100 : 0
-                  const pnlColor = marketPnl >= 0 ? '#00D62B' : '#ff5c5c'
                   return (
-                    <>
-                      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                        <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${t.totalValueSol} SOL`} sub={t.tokenValueSol != null ? `tokens ${t.tokenValueSol} + native ${t.nativeSol}` : 'current holdings est.'} />
-                        <Stat icon={<Activity className="h-4 w-4" />} label="Claimed (all time)" value={`${t.totalClaimedSol} SOL`} sub={`${t.claimCount} claims`} />
-                        <Stat icon={<Flame className="h-4 w-4" />} label="Burned (fees)" value={`${t.totalBurnedSol} SOL`} sub="buyback + burn (permanent)" />
-                        <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />
-                      </div>
-                      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-card)] p-4 text-xs">
-                        <div className="mb-2 font-bold uppercase tracking-wide text-[var(--color-text-muted)]">
-                          Vault PnL breakdown
-                        </div>
-                        <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-                          <div>
-                            <div className="text-[var(--color-text-muted)]">Claimed in</div>
-                            <div className="font-mono">{claimed.toFixed(6)} SOL</div>
-                          </div>
-                          <div>
-                            <div className="text-[var(--color-text-muted)]">− Burned (by design)</div>
-                            <div className="font-mono">−{burned.toFixed(6)} SOL</div>
-                          </div>
-                          <div>
-                            <div className="text-[var(--color-text-muted)]">= Retained cost basis</div>
-                            <div className="font-mono">{retained.toFixed(6)} SOL</div>
-                          </div>
-                          <div>
-                            <div className="text-[var(--color-text-muted)]">Market PnL vs basis</div>
-                            <div className="font-mono font-bold" style={{ color: pnlColor }}>
-                              {marketPnl >= 0 ? '+' : ''}
-                              {marketPnl.toFixed(6)} SOL ({marketPnl >= 0 ? '+' : ''}
-                              {marketPnlPct.toFixed(2)}%)
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-3 text-[var(--color-text-muted)]">
-                          60% of every fee claim is permanently removed via buy-and-burn of the
-                          platform token — that portion is <strong>not a loss</strong>, it's the
-                          deflationary mechanic. The remaining ~40% is allocated into the vault's
-                          tier holdings and moves with the market (that's the &quot;Market PnL&quot;
-                          above).
-                        </div>
-                      </div>
-                    </>
+                    <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                      <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${t.totalValueSol} SOL`} sub={t.tokenValueSol != null ? `tokens ${t.tokenValueSol} + native ${t.nativeSol}` : 'current holdings est.'} />
+                      <Stat icon={<Activity className="h-4 w-4" />} label="Claimed (all time)" value={`${t.totalClaimedSol} SOL`} sub={`${t.claimCount} claims`} />
+                      <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />
+                    </div>
                   )
                 })()}
 

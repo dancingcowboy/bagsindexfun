@@ -1,4 +1,4 @@
-import { Worker, type Job, Queue } from 'bullmq'
+import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
 import {
   buildBuyTransaction,
@@ -10,19 +10,15 @@ import {
 } from '@bags-index/solana'
 import {
   QUEUE_SWITCH,
-  QUEUE_BURN,
   TOP_N_TOKENS,
   LAMPORTS_PER_SOL,
   SOL_MINT,
-  SWITCH_FEE_BPS,
-  WITHDRAWAL_FEE_BPS,
-  DEPOSIT_FEE_BPS,
+  BAGSX_MINT,
+  BAGSX_WEIGHT_PCT,
   TIER_SCORING_CONFIG,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
-
-const burnQueue = new Queue(QUEUE_BURN, { connection: redis })
 
 interface SwitchJobData {
   switchJobId: string
@@ -43,7 +39,7 @@ interface SwitchJobData {
  *         later buy the shortfall (target − source) from the SOL pool.
  *       - else → sell only the excess fraction, keep the rest.
  *  3. For mints in source but NOT in dest → sell 100% → SOL pool.
- *  4. Charge the flat switch fee (1%) from the SOL pool → enqueue burn.
+ *  4. (No switch fee.)
  *  5. For mints in dest but NOT in source → buy from SOL pool.
  *  6. For kept-overlap mints, move their Holding row from source to dest
  *     sub-wallet (with proportional cost-basis transfer).
@@ -96,11 +92,15 @@ async function processSwitch(job: Job<SwitchJobData>) {
     )
     if (sourceValueSol <= 0) throw new Error('Source value is zero')
 
-    const feeSol = (sourceValueSol * SWITCH_FEE_BPS) / 10_000
-    // Destination tier may hold a native SOL anchor (e.g. 20% for CONSERVATIVE).
+    // No switch fee. Destination tier may hold a SOL anchor (e.g. 12% for
+    // CONSERVATIVE) and every vault holds a fixed BAGSX_WEIGHT_PCT slice in
+    // $BAGSX. Remaining capital is scored-token composition.
+    const feeSol = 0
     const dstTierCfg = TIER_SCORING_CONFIG[switchJob.toTier as keyof typeof TIER_SCORING_CONFIG]
     const anchorPct = dstTierCfg?.solAnchorPct ?? 0
-    const netSol = (sourceValueSol - feeSol) * (1 - anchorPct / 100)
+    const scoredScale = 1 - anchorPct / 100 - BAGSX_WEIGHT_PCT / 100
+    const netSol = sourceValueSol * scoredScale
+    const bagsxSol = sourceValueSol * (BAGSX_WEIGHT_PCT / 100)
 
     // 2. Load destination top-10 weights (latest completed scoring cycle).
     const latestCycle = await db.scoringCycle.findFirst({
@@ -134,6 +134,9 @@ async function processSwitch(job: Job<SwitchJobData>) {
       const w = Number(score.compositeScore) / totalScore
       targets.set(score.tokenMint, netSol * w)
     }
+    // Fixed BAGSX exposure slice — treated as any other target mint by the
+    // sell/buy planner below.
+    if (bagsxSol > 0) targets.set(BAGSX_MINT, bagsxSol)
 
     // Quick lookup: source holding by mint
     const srcByMint = new Map(srcWallet.holdings.map((h) => [h.tokenMint, h]))
@@ -264,17 +267,8 @@ async function processSwitch(job: Job<SwitchJobData>) {
       }
     }
 
-    // 5. Charge the flat fee from the pool, enqueue a single burn job.
-    const feeLamports = BigInt(Math.floor(feeSol * LAMPORTS_PER_SOL))
-    if (poolLamports < feeLamports) {
-      // Fee exceeds recovered pool (e.g. all sells failed). Use whatever we have.
-      logger.error(
-        `[switch] Pool ${poolLamports} < fee ${feeLamports} — charging pool`,
-      )
-    }
-    const feeCharged = poolLamports < feeLamports ? poolLamports : feeLamports
-    poolLamports -= feeCharged
-    const feeChargedSol = Number(feeCharged) / LAMPORTS_PER_SOL
+    // No fee to charge — full pool is available for dest buys.
+    const feeChargedSol = 0
 
     // 6. Migrate kept holdings to the destination sub-wallet.
     //    Cost basis is transferred proportionally alongside the tokens.
@@ -322,24 +316,20 @@ async function processSwitch(job: Job<SwitchJobData>) {
     }
 
     // 7. Buy dest tokens we don't already have enough of, from the SOL pool.
-    //    For overlap mints we kept, the "shortfall" is (target − srcVal); for
-    //    dest-only mints it's the full target.
+    //    Iterates over every target mint (scored top-10 + fixed BAGSX slice).
     interface BuyPlan {
       mint: string
       solLamports: bigint
     }
     const buyPlans: BuyPlan[] = []
-    for (const score of latestCycle.scores) {
-      const target = targets.get(score.tokenMint) ?? 0
+    for (const [mint, target] of targets) {
       if (target <= 0) continue
-      const srcHolding = srcByMint.get(score.tokenMint)
+      const srcHolding = srcByMint.get(mint)
       const srcVal = srcHolding ? Number(srcHolding.valueSolEst) : 0
-      // Shortfall only exists when target > srcVal (kept ≤ target case).
-      // If target < srcVal we already trimmed on the sell side.
       const shortSol = Math.max(0, target - srcVal)
       if (shortSol <= 0) continue
       const lamports = BigInt(Math.floor(shortSol * LAMPORTS_PER_SOL))
-      if (lamports > 0n) buyPlans.push({ mint: score.tokenMint, solLamports: lamports })
+      if (lamports > 0n) buyPlans.push({ mint, solLamports: lamports })
     }
 
     // Bridge: physically move the recovered SOL pool from src → dst sub-wallet
@@ -430,12 +420,9 @@ async function processSwitch(job: Job<SwitchJobData>) {
       }
     }
 
-    // 8. Estimate savings vs. the naïve withdraw+deposit flow.
-    //    Naïve: 2% withdrawal fee + 3% deposit fee = 5% of source value
-    //    Smart: 1% switch fee + overlap tokens skip round-trip swaps
-    const naiveFee = sourceValueSol * ((WITHDRAWAL_FEE_BPS + DEPOSIT_FEE_BPS) / 10_000)
-    const feeSaved = naiveFee - feeChargedSol
-    const solSaved = Math.max(0, feeSaved)
+    // No fee comparison — switch is free. solSaved preserved as 0 for the
+    // existing DB column.
+    const solSaved = 0
 
     // Reconcile both wallets to actual on-chain balances. The src side
     // should be empty (or hold only kept-overlap dust); the dst side
@@ -465,16 +452,8 @@ async function processSwitch(job: Job<SwitchJobData>) {
       },
     })
 
-    // Enqueue the single burn for the full switch fee
-    if (feeChargedSol > 0) {
-      await burnQueue.add('burn-switch-fee', {
-        switchJobId,
-        feeSol: feeChargedSol.toString(),
-      })
-    }
-
     logger.info(
-      `[switch] ${switchJobId} done: kept=${overlapKept} sells=${sellsExecuted} buys=${buysExecuted} fee=${feeChargedSol.toFixed(6)} saved=${solSaved.toFixed(6)}`,
+      `[switch] ${switchJobId} done: kept=${overlapKept} sells=${sellsExecuted} buys=${buysExecuted}`,
     )
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

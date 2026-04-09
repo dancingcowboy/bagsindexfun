@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { createDepositSchema, confirmDepositSchema, DEPOSIT_FEE_BPS } from '@bags-index/shared'
+import { createDepositSchema, confirmDepositSchema } from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
-import { depositQueue, burnQueue } from '../queue/queues.js'
+import { depositQueue } from '../queue/queues.js'
 
 export async function depositRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth)
@@ -49,8 +49,10 @@ export async function depositRoutes(app: FastifyInstance) {
         }
       }
 
-      const feeSol = (amountSol * DEPOSIT_FEE_BPS) / 10_000
-      const netAmountSol = amountSol - feeSol
+      // No deposit fee — the vault instead holds a fixed 8% BAGSX exposure,
+      // bought via the standard allocation + rebalance pipeline.
+      const feeSol = 0
+      const netAmountSol = amountSol
 
       const deposit = await db.deposit.create({
         data: {
@@ -82,7 +84,7 @@ export async function depositRoutes(app: FastifyInstance) {
 
   /**
    * POST /deposits/:id/confirm
-   * Submit tx signature. Verifies on-chain, then enqueues allocation + burn.
+   * Submit tx signature. Verifies on-chain, then enqueues allocation.
    */
   app.post('/:id/confirm', async (req, reply) => {
     try {
@@ -109,12 +111,6 @@ export async function depositRoutes(app: FastifyInstance) {
       await depositQueue.add('allocate', {
         depositId: id,
         userId,
-      })
-
-      // Enqueue burn job for the fee
-      await burnQueue.add('burn-deposit-fee', {
-        depositId: id,
-        feeSol: deposit.feeSol.toString(),
       })
 
       return {

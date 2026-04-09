@@ -20,7 +20,7 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: 'Bags Index — The Index Fund for Bags',
   description:
-    'Auto-rebalancing index vault for the Bags ecosystem on Solana. Per-user Privy sub-wallets, withdraw anytime. Top 10 tokens, daily rebalancing, buy-and-burn flywheel.',
+    'Auto-rebalancing index vault for the Bags ecosystem on Solana. Per-user Privy sub-wallets, withdraw anytime. Top 10 tokens, daily rebalancing, every vault holds 8% $BAGSX.',
   icons: {
     icon: '/favicon.svg',
   },

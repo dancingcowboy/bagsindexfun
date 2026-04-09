@@ -308,7 +308,7 @@ export async function adminRoutes(app: FastifyInstance) {
   )
 
   /**
-   * GET /admin/vault — protocol vault holdings, deposits, burns summary.
+   * GET /admin/vault — protocol vault holdings and deposits summary.
    * Admin-only; returns the system:protocol-vault user's sub-wallets,
    * token holdings, and fee-claim history.
    */
@@ -386,13 +386,6 @@ export async function adminRoutes(app: FastifyInstance) {
         0,
       )
 
-      // Burned SOL — actual amounts spent on buyback+burn, scoped to this user.
-      const burns = await db.burnRecord.findMany({
-        where: { deposit: { userId: user.id } },
-        select: { solSpent: true },
-      })
-      const totalBurnedSol = burns.reduce((s, b) => s + Number(b.solSpent || 0), 0)
-
       return {
         success: true,
         data: {
@@ -432,7 +425,6 @@ export async function adminRoutes(app: FastifyInstance) {
             tokenValueSol: tokenValueSol.toFixed(6),
             nativeSol: nativeSol.toFixed(6),
             totalClaimedSol: totalClaimedSol.toFixed(6),
-            totalBurnedSol: totalBurnedSol.toFixed(6),
             claimCount: claimDeposits.length,
           },
           recentClaims: claimDeposits.slice(0, 10).map((d) => ({
@@ -720,7 +712,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /**
    * GET /admin/overview
-   * One-shot dashboard payload — users, volumes, fees, burns, queues, latest cycles.
+   * One-shot dashboard payload — users, volumes, fees, queues, latest cycles.
    */
   app.get('/overview', async (_req, reply) => {
     try {
@@ -738,7 +730,6 @@ export async function adminRoutes(app: FastifyInstance) {
         depositAgg,
         deposit24hAgg,
         withdrawalAgg,
-        burnAgg,
         projectVaultCount,
         projectVaultAgg,
         blacklistCount,
@@ -777,11 +768,6 @@ export async function adminRoutes(app: FastifyInstance) {
           where: { status: 'CONFIRMED' },
           _count: true,
           _sum: { amountSol: true, feeSol: true },
-        }),
-        db.burnRecord.aggregate({
-          where: { status: 'CONFIRMED' },
-          _count: true,
-          _sum: { solSpent: true },
         }),
         db.projectVault.count(),
         db.projectVault.aggregate({
@@ -830,10 +816,6 @@ export async function adminRoutes(app: FastifyInstance) {
             total: withdrawalAgg._count,
             totalSol: withdrawalAgg._sum.amountSol?.toString() ?? '0',
             totalFeeSol: withdrawalAgg._sum.feeSol?.toString() ?? '0',
-          },
-          burns: {
-            total: burnAgg._count,
-            solSpent: burnAgg._sum.solSpent?.toString() ?? '0',
           },
           projectVaults: {
             total: projectVaultCount,

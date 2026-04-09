@@ -1,5 +1,5 @@
 /**
- * Pre-written 14-day, 84-tweet launch campaign for @bagsindex.
+ * Pre-written 14-day launch campaign for @bagsindex.
  *
  * Posted every 4 hours starting from launch time. Each entry has:
  *   - text: ≤ 280 chars (we keep them well under)
@@ -23,7 +23,7 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `three tiers, three personalities:\n\n🟦 conservative — SOL anchored, mature tokens, 24h rebalance\n🟩 balanced — top performers, 12h rebalance\n🟧 degen — high momentum, 4h rebalance\n\npick your appetite.`, imageQuery: 'three doors' },
   { text: `every Bags token earns its place in the index by score, not vibes:\n\n• 24h volume\n• holder growth\n• liquidity depth\n\nthen an autonomous Claude agent reviews the top picks and ejects anything that smells. fully transparent.`, imageQuery: 'data dashboard' },
   { text: `non-custodial by design.\n\nyour funds live in per-tier sub-wallets signed by Privy's HSM. we never touch a private key. you withdraw whenever you want.`, imageQuery: 'vault security' },
-  { text: `$BAGSX is live on Bags.\n\nCA: ${CA}\n\nevery deposit and withdrawal on bags-index buys back and burns it. ${X}`, imageQuery: 'fire flame' },
+  { text: `$BAGSX is live on Bags.\n\nCA: ${CA}\n\nevery index vault — user and protocol — holds a fixed 8% slice of it. ${X}`, imageQuery: 'platform token' },
 
   // ─── Day 2 — How it works ─────────────────────────────────────────────────
   { text: `how the scoring works (1/3):\n\nevery 24h we pull every Bags token from the launch feed, grab volume + holders + liquidity from Helius, and compute a composite score.\n\ntop 10 by tier go in.`, imageQuery: 'algorithm code' },
@@ -46,15 +46,9 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `the rebalance worker is idempotent.\n\nif it crashes mid-cycle, it picks up exactly where it left off. no double-swaps, no missed swaps. BullMQ handles the recovery.`, imageQuery: 'circular loop' },
   { text: `5% max slippage cap on every swap. hardcoded. can't be raised by anyone — not even us — without a code change + redeploy.\n\nyou will never be sandwiched into oblivion by bags-index.`, imageQuery: 'safety net' },
   { text: `audit log is queryable:\n\nevery scoring cycle, every rebalance, every swap signature is recorded in postgres + queryable via the API. transparency by default. ${X}`, imageQuery: 'open ledger book' },
-  { text: `the 3% deposit fee and 2% withdrawal fee don't go to a treasury wallet.\n\n100% of every fee buys back $BAGSX and burns it. no team allocation, no insider unlocks, no side pot.`, imageQuery: 'burning paper' },
   { text: `non-custodial doesn't mean trustless.\n\nyou trust Privy to sign correctly. you trust us to write a worker that swaps the right amounts. but you do NOT trust us with your keys, and you can withdraw any time.`, imageQuery: 'handshake trust' },
 
-  // ─── Day 5 — The flywheel ─────────────────────────────────────────────────
-  { text: `the deflationary flywheel:\n\n1. user deposits SOL\n2. 3% fee → buy $BAGSX\n3. 100% of bought tokens → burn\n4. supply ↓\n5. price discovery ↑\n6. more users notice\n7. goto 1`, imageQuery: 'flywheel mechanical' },
-  { text: `every deposit, every withdrawal, AND every Bags fee-share claim feeds the burn.\n\nmore usage = more burns = tighter supply = stronger token = more usage.\n\nthis is the only "tokenomics" we believe in.`, imageQuery: 'fire flame' },
-  { text: `no airdrop teasing. no points farming. no "wen utility."\n\n$BAGSX has one mechanic from day one: every flow through the vault buys it back and burns it. that's it. CA: ${CA}`, imageQuery: 'silence quiet' },
-  { text: `the burn fires on auto-claimed Bags fees too.\n\nany project that routes a slice of their fee-share into the bags-index protocol vault triggers the same 3% buy-and-burn on every claim.\n\nthe whole ecosystem feeds the flywheel.`, imageQuery: 'gears wheel' },
-  { text: `if you've watched a hundred DeFi launches die because the tokenomics ate the product, you know why we're doing it the other way around.\n\nproduct first. burn-only token. no unlocks to dump. ${X}`, imageQuery: 'puzzle pieces' },
+  // ─── Day 5 — Product discipline ──────────────────────────────────────────
   { text: `the index works without the token. the token captures value because the index works.\n\nthat's the discipline. that's the bet.`, imageQuery: 'chess strategy' },
 
   // ─── Day 6 — For projects (Bags App) ──────────────────────────────────────
@@ -62,7 +56,6 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `for project founders:\n\nstop holding 100% of your treasury in your own token.\n\nroute a slice of your trading fees into a bags-index vault. now your treasury is exposed to the whole ecosystem, on-chain, automatically.`, imageQuery: 'diversification portfolio' },
   { text: `already launched on Bags? no problem.\n\nyour fee admin can call /fee-share/admin/update-config any time to add a bags-index vault to your claimers.\n\nadoption isn't gated to launch day.`, imageQuery: 'door open' },
   { text: `the public projects leaderboard is live: ${X}/projects\n\ntracking every project that's routing fees into the index, the SOL flowing in, and the current vault value. real treasury commitment, ranked.`, imageQuery: 'leaderboard trophy' },
-  { text: `every SOL claimed from a project's fee-share flows through the standard deposit pipeline.\n\nthat means the same 3% buy-and-burn of $BAGSX fires on every claim. the project gets compound exposure, $BAGSX gets burned. everyone wins.`, imageQuery: 'two way street' },
   { text: `for the projects asking "what does my community get out of it":\n\npublic leaderboard credit, public proof of treasury diversification, and a vault that compounds passively. that's the pitch. ${X}/projects`, imageQuery: 'community group' },
 
   // ─── Day 7 — One week in ─────────────────────────────────────────────────
@@ -126,9 +119,9 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `what's next (in priority order):\n\n1. portfolio chart in SOL terms\n2. tier comparison view\n3. project leaderboard polish\n4. mobile-first dashboard\n5. real-time SSE updates\n\nshipping weekly.`, imageQuery: 'roadmap path' },
   { text: `the metric i actually care about, two weeks in:\n\nnot TVL. not deposits. not Twitter followers.\n\n"how many users came back for a second deposit." that's the only number that means the product works. ${X}`, imageQuery: 'returning home' },
   { text: `if the only thing you remember from this campaign is one thing, make it this:\n\nyou don't have to pick the winner. you can own the basket. you can sleep. that's it. that's the whole product.`, imageQuery: 'one bag basket' },
-  { text: `$BAGSX exists because the index needed value capture without a treasury wallet that could dump.\n\n100% buy and burn on every flow. no team allocation. CA: ${CA}`, imageQuery: 'patient waiting' },
+  { text: `$BAGSX exists because the index needed value capture without a treasury wallet that could dump.\n\nevery vault holds 8%. no team allocation, no unlocks. CA: ${CA}`, imageQuery: 'patient waiting' },
   { text: `gm. day 14 of @bagsindex in public.\n\nif you've been here from day 1 — thank you. if you just got here — welcome. either way, the index keeps running and the boring keeps compounding. ${X}`, imageQuery: 'thank you notes' },
 ]
 
-/** 14 days × 6 tweets/day = 84 */
+/** 14-day launch campaign */
 export const TWEET_PLAN_SIZE = TWEET_PLAN.length

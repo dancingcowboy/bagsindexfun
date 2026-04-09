@@ -119,7 +119,7 @@ export default function LandingPage() {
           >
             Deposit SOL. Auto-allocate across the top 10 performing tokens on
             Bags — scored daily by volume, holder growth, and liquidity. Every
-            deposit and withdrawal burns the platform token.
+            vault holds 8% $BAGSX.
           </motion.p>
 
           <motion.div
@@ -242,7 +242,7 @@ export default function LandingPage() {
               step: '01',
               icon: <Zap className="h-5 w-5" />,
               title: 'Pick a Tier & Deposit',
-              desc: 'Choose Conservative, Balanced, or Degen. Deposit SOL. 97% enters your personal vault — 3% fuels the burn flywheel.',
+              desc: 'Choose Conservative, Balanced, or Degen. Deposit SOL — 100% enters your vault, 8% of which is $BAGSX exposure.',
             },
             {
               step: '02',
@@ -456,24 +456,24 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─── Token Flywheel ───────────────────────────────────────────── */}
+      {/* ─── $BAGSX Exposure ──────────────────────────────────────────── */}
       <section className="mx-auto max-w-7xl px-6 py-24">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold">
-            Deflationary{' '}
-            <span style={{ color: '#00D62B' }}>Flywheel</span>
+            $BAGSX{' '}
+            <span style={{ color: '#00D62B' }}>Exposure</span>
           </h2>
           <p className="mt-3 text-[var(--color-text-secondary)] max-w-md mx-auto">
-            Every deposit and withdrawal fuels a buy-and-burn cycle.
+            Every vault holds a fixed 8% slice of the platform token. No fees.
           </p>
         </div>
 
         <div className="mx-auto max-w-xl">
           {[
             { icon: <Users className="h-5 w-5" />, text: 'Users deposit SOL', color: '#00D62B' },
-            { icon: <Flame className="h-5 w-5" />, text: 'Deposit/withdrawal fees → buy & burn $BAGSX', color: '#ff4444' },
-            { icon: <TrendingUp className="h-5 w-5" />, text: 'Supply decreases → price appreciates', color: '#00D62B' },
-            { icon: <Zap className="h-5 w-5" />, text: 'Holders promote → more users join', color: '#ffd000' },
+            { icon: <Flame className="h-5 w-5" />, text: 'Every vault holds 8% $BAGSX', color: '#ff4444' },
+            { icon: <TrendingUp className="h-5 w-5" />, text: 'TVL grows → protocol accumulates more $BAGSX', color: '#00D62B' },
+            { icon: <Zap className="h-5 w-5" />, text: 'No fees — 100% of every flow goes to users', color: '#ffd000' },
           ].map((step, i) => (
             <motion.div
               key={i}
@@ -496,7 +496,7 @@ export default function LandingPage() {
             </motion.div>
           ))}
           <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
-            Cycle repeats → deflationary pressure compounds
+            Every user vault and the protocol vault alike hold 8% $BAGSX
           </p>
         </div>
       </section>
@@ -510,9 +510,8 @@ export default function LandingPage() {
           <p className="mt-3 text-[var(--color-text-secondary)] max-w-2xl mx-auto">
             Every $BAGSX trade earns fees on Bags. The protocol vault wallet
             collects its share, a worker <strong>auto-claims every 4 hours</strong>,
-            and the SOL is deposited into the index vaults — where the same{' '}
-            <strong>3% in / 2% out</strong> burn rule applies as for any user
-            deposit or withdrawal.
+            and the SOL is deposited into the index vaults. The protocol vault
+            holds 8% $BAGSX just like every user vault.
           </p>
         </div>
 
@@ -530,8 +529,8 @@ export default function LandingPage() {
             },
             {
               step: '3',
-              title: '3% in / 2% out',
-              desc: 'Every SOL entering a vault burns 3% of itself in $BAGSX. Every SOL leaving burns 2%. Same flat rule for users and for auto-claimed fees — no exceptions.',
+              title: '8% $BAGSX slice',
+              desc: 'Every vault — user and protocol — holds a fixed 8% exposure to $BAGSX. No fees, no burns.',
             },
           ].map((s) => (
             <div
@@ -553,7 +552,7 @@ export default function LandingPage() {
         </div>
 
         <p className="text-center text-xs text-[var(--color-text-muted)]">
-          Hold $BAGSX → every platform trade shrinks the circulating supply.
+          As TVL grows, the protocol accumulates more $BAGSX on every deposit and rebalance.
         </p>
       </section>
 
@@ -562,26 +561,18 @@ export default function LandingPage() {
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold">Fee Structure</h2>
         </div>
-        <div className="grid gap-6 md:grid-cols-2 max-w-2xl mx-auto">
-          {[
-            { pct: '3%', label: 'Deposit', split: '100% buyback & burn $BAGSX. 97% of every deposit is allocated into the index.' },
-            { pct: '2%', label: 'Withdrawal', split: '100% buyback & burn $BAGSX. 98% of every withdrawal goes back to you.' },
-          ].map((fee) => (
-            <div
-              key={fee.label}
-              className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 text-center"
-            >
-              <div className="text-4xl font-bold" style={{ color: '#00D62B' }}>
-                {fee.pct}
-              </div>
-              <div className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                {fee.label} Fee
-              </div>
-              <div className="mt-3 text-xs text-[var(--color-text-muted)]">
-                {fee.split}
-              </div>
+        <div className="max-w-md mx-auto">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 text-center">
+            <div className="text-4xl font-bold" style={{ color: '#00D62B' }}>
+              8%
             </div>
-          ))}
+            <div className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              $BAGSX
+            </div>
+            <div className="mt-3 text-xs text-[var(--color-text-muted)]">
+              Every vault holds 8% exposure to the platform token. No deposit or withdrawal fees.
+            </div>
+          </div>
         </div>
       </section>
 

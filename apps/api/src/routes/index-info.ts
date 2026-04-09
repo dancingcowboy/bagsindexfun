@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 
 /**
- * Public routes — no auth required. Exposes index composition and burn stats.
+ * Public routes — no auth required. Exposes index composition.
  */
 export async function indexInfoRoutes(app: FastifyInstance) {
   /**
@@ -370,39 +370,4 @@ export async function indexInfoRoutes(app: FastifyInstance) {
     },
   )
 
-  /**
-   * GET /index/burns
-   * Platform token burn stats and history.
-   */
-  app.get('/burns', async (_req, reply) => {
-    try {
-      const burns = await db.burnRecord.findMany({
-        where: { status: 'CONFIRMED' },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      })
-
-      const totalBurned = burns.reduce((sum, b) => sum + b.tokensBurned, 0n)
-      const totalSolSpent = burns.reduce((sum, b) => sum + Number(b.solSpent), 0)
-
-      return {
-        success: true,
-        data: {
-          totalTokensBurned: totalBurned.toString(),
-          totalSolSpent: totalSolSpent.toFixed(9),
-          burnCount: burns.length,
-          recentBurns: burns.slice(0, 20).map((b) => ({
-            id: b.id,
-            tokensBurned: b.tokensBurned.toString(),
-            solSpent: Number(b.solSpent).toFixed(9),
-            burnTxSig: b.burnTxSig,
-            createdAt: b.createdAt,
-          })),
-        },
-      }
-    } catch (err) {
-      app.log.error(err, 'Failed to get burn stats')
-      return reply.status(500).send({ error: 'Internal server error' })
-    }
-  })
 }

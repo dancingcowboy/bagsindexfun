@@ -12,7 +12,6 @@ import { createScoringWorker } from './workers/scoring.worker.js'
 import { createDepositWorker } from './workers/deposit.worker.js'
 import { createWithdrawalWorker } from './workers/withdrawal.worker.js'
 import { createRebalanceWorker } from './workers/rebalance.worker.js'
-import { createBurnWorker } from './workers/burn.worker.js'
 import { createAnalysisWorker } from './workers/analysis.worker.js'
 import { createFeeClaimWorker } from './workers/fee-claim.worker.js'
 import { createPriceSnapshotWorker } from './workers/price-snapshot.worker.js'
@@ -27,7 +26,6 @@ const scoringWorker = createScoringWorker()
 const depositWorker = createDepositWorker()
 const withdrawalWorker = createWithdrawalWorker()
 const rebalanceWorker = createRebalanceWorker()
-const burnWorker = createBurnWorker()
 const analysisWorker = createAnalysisWorker()
 const feeClaimWorker = createFeeClaimWorker()
 const priceSnapshotWorker = createPriceSnapshotWorker()
@@ -103,7 +101,6 @@ const gracefulShutdown = async () => {
     depositWorker.close(),
     withdrawalWorker.close(),
     rebalanceWorker.close(),
-    burnWorker.close(),
     analysisWorker.close(),
     feeClaimWorker.close(),
     priceSnapshotWorker.close(),

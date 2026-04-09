@@ -3,9 +3,6 @@ import { db } from '@bags-index/db'
 import {
   RISK_TIERS,
   createSwitchSchema,
-  SWITCH_FEE_BPS,
-  DEPOSIT_FEE_BPS,
-  WITHDRAWAL_FEE_BPS,
 } from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
 import { switchQueue } from '../queue/queues.js'
@@ -188,7 +185,8 @@ export async function portfolioRoutes(app: FastifyInstance) {
       if (sourceValueSol <= 0) {
         return reply.status(400).send({ error: 'Source value is zero' })
       }
-      const feeSol = (sourceValueSol * SWITCH_FEE_BPS) / 10_000
+      // No switch fee — vault exposure is fee-free end-to-end.
+      const feeSol = 0
 
       const job = await db.switchJob.create({
         data: {
@@ -203,9 +201,6 @@ export async function portfolioRoutes(app: FastifyInstance) {
 
       await switchQueue.add('switch', { switchJobId: job.id, userId })
 
-      const naiveFee =
-        sourceValueSol * ((WITHDRAWAL_FEE_BPS + DEPOSIT_FEE_BPS) / 10_000)
-
       return {
         success: true,
         data: {
@@ -214,8 +209,6 @@ export async function portfolioRoutes(app: FastifyInstance) {
           toTier: job.toTier,
           sourceValueSol: sourceValueSol.toFixed(9),
           feeSol: feeSol.toFixed(9),
-          naiveFeeSol: naiveFee.toFixed(9),
-          estimatedSavingsSol: Math.max(0, naiveFee - feeSol).toFixed(9),
           status: job.status,
         },
       }
@@ -419,9 +412,9 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return { success: true, data: { points: [], hours, cashflowCount: 0 } }
       }
 
-      // Cashflows: deposits in - withdrawals out, both gross (the burn fee
-      // and slippage are internal costs that should hit the return, not
-      // be neutralized as a "user cashflow").
+      // Cashflows: deposits in - withdrawals out, both gross. Slippage is
+      // an internal cost that should hit the return, not be neutralized
+      // as a "user cashflow".
       const [deposits, withdrawals] = await Promise.all([
         db.deposit.findMany({
           where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },

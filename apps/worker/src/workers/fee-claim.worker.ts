@@ -8,14 +8,11 @@ import {
 } from '@bags-index/solana'
 import {
   QUEUE_FEE_CLAIM,
-  QUEUE_BURN,
   QUEUE_DEPOSIT,
   LAMPORTS_PER_SOL,
-  DEPOSIT_FEE_BPS,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
-const burnQueue = new Queue(QUEUE_BURN, { connection: redis })
 const depositQueue = new Queue(QUEUE_DEPOSIT, { connection: redis })
 
 // Stable identifier for the protocol's own "user" — owns the vault sub-wallet
@@ -67,11 +64,9 @@ async function ensureSystemVaultSubWallet(
  * Bags trading fees on the platform token are split natively by Bags into two
  * recipient wallets: the team treasury (claimed manually) and the protocol
  * vault (this worker). The vault wallet's accrued fees are claimed every 4h
- * via the Bags API. The claimed SOL is treated as a deposit into the vault:
- * the standard deposit-fee burn rule (DEPOSIT_FEE_BPS = 3%) applies — 3% is
- * routed to the buyback+burn queue, the remaining 97% stays on the vault
- * wallet to be allocated by the rebalance/index pipeline. Same flat rule as
- * a user deposit, no exceptions.
+ * via the Bags API. The claimed SOL is treated as a fee-free deposit into
+ * the vault — allocated across the standard index composition (scored
+ * tokens + 8% BAGSX slice + tier SOL anchor), identical to a user deposit.
  *
  * Signing path: vault is a Privy Server Wallet — we never hold the private
  * key. The privy.walletApi.signTransaction call is stubbed below until the
@@ -106,7 +101,7 @@ async function processFeeClaim(_job: Job) {
     return
   }
 
-  // 2. Claim each position. Track total SOL claimed for the burn enqueue.
+  // 2. Claim each position. Track total SOL claimed for the deposit enqueue.
   let totalLamportsClaimed = 0n
   for (const pos of withFees) {
     try {
@@ -144,12 +139,9 @@ async function processFeeClaim(_job: Job) {
   if (totalLamportsClaimed <= 0n) return
 
   const totalSol = Number(totalLamportsClaimed) / LAMPORTS_PER_SOL
-  // Standard 3% deposit-fee rule. 3% buys back+burns BAGSX, 97% is allocated
-  // by the deposit-allocation pipeline (same code path as a user deposit).
-  const burnSol = (totalSol * DEPOSIT_FEE_BPS) / 10_000
 
   // 3. Make sure the system vault sub-wallet exists, then create a Deposit
-  // row for it and enqueue the same allocation + burn jobs that a real
+  // row for it and enqueue the same allocation jobs that a real
   // user deposit would. Auto-claimed fees flow into whichever tier the
   // protocol vault is currently configured for (default BALANCED, but an
   // admin vault-switch can move it to CONSERVATIVE or DEGEN).
@@ -162,7 +154,7 @@ async function processFeeClaim(_job: Job) {
       userId: systemUser.id,
       riskTier: activeTier,
       amountSol: totalSol,
-      feeSol: burnSol,
+      feeSol: 0,
       status: 'CONFIRMED',
       confirmedAt: new Date(),
     },
@@ -176,8 +168,6 @@ async function processFeeClaim(_job: Job) {
         positions: withFees.length,
         lamportsClaimed: totalLamportsClaimed.toString(),
         sol: totalSol,
-        burnSol,
-        depositFeeBps: DEPOSIT_FEE_BPS,
         riskTier: activeTier,
       },
     },
@@ -187,13 +177,9 @@ async function processFeeClaim(_job: Job) {
     depositId: deposit.id,
     userId: systemUser.id,
   })
-  await burnQueue.add('burn-deposit-fee', {
-    depositId: deposit.id,
-    feeSol: burnSol.toString(),
-  })
 
   logger.info(
-    `[fee-claim] Claimed ${totalSol.toFixed(6)} SOL across ${withFees.length} position(s); enqueued ${activeTier} allocation + ${burnSol.toFixed(6)} SOL burn (deposit ${deposit.id})`,
+    `[fee-claim] Claimed ${totalSol.toFixed(6)} SOL across ${withFees.length} position(s); enqueued ${activeTier} allocation (deposit ${deposit.id})`,
   )
 }
 

@@ -2,10 +2,9 @@
 
 /**
  * Every index vault (user + protocol system vault) holds a fixed 8% slice in
- * $BAGSX, the platform token. Replaces the old 3%/2% deposit/withdrawal fees
- * and the buyback-and-burn flywheel — now every participant is directly
- * exposed to the platform's upside via native token holdings. Sold back to
- * SOL on withdrawal like any other holding.
+ * $BAGSX, the platform token. Every participant is directly exposed to the
+ * platform's upside via native token holdings. No deposit, withdrawal, or
+ * switch fees. Sold back to SOL on withdrawal like any other holding.
  */
 export const BAGSX_MINT = 'DTp6oMA51WydSAcqY8cgYCFTtQXcQHNq5geCSgrwBAGS'
 export const BAGSX_WEIGHT_PCT = 8

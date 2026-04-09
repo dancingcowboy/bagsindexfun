@@ -11,7 +11,6 @@ import {
   Wallet,
   PieChart,
   History,
-  Flame,
   RefreshCw,
   Shuffle,
 } from 'lucide-react'
@@ -60,12 +59,6 @@ export default function DashboardPage() {
     refetchInterval: 60_000,
   })
 
-  const { data: burnData } = useQuery({
-    queryKey: ['burn-stats'],
-    queryFn: () => api.getBurnStats(),
-    refetchInterval: 60_000,
-  })
-
   const { data: pnlData } = useQuery({
     queryKey: ['pnl'],
     queryFn: () => api.getPnl(),
@@ -76,7 +69,6 @@ export default function DashboardPage() {
   const holdings = portfolio?.data?.holdings ?? []
   const totalValueSol = portfolio?.data?.totalValueSol ?? '0'
   const tokens = indexData?.data?.tokens ?? []
-  const burns = burnData?.data
 
   const handleDeposit = async () => {
     const amount = parseFloat(depositAmount)
@@ -163,7 +155,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-3">
             <div className="card">
               <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] mb-1">
                 <Wallet className="h-4 w-4" /> Total Value
@@ -186,14 +178,6 @@ export default function DashboardPage() {
               </div>
               <div className="font-[family-name:var(--font-display)] text-2xl font-bold">
                 {deposits?.data?.length ?? 0}
-              </div>
-            </div>
-            <div className="card">
-              <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] mb-1">
-                <Flame className="h-4 w-4" /> Tokens Burned
-              </div>
-              <div className="font-[family-name:var(--font-display)] text-2xl font-bold">
-                {(Number(burns?.totalTokensBurned || 0) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </div>
             </div>
           </div>
