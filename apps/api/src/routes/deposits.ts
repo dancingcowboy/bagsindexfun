@@ -23,6 +23,32 @@ export async function depositRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Sub-wallet not initialized' })
       }
 
+      // Per-user deposit cap (override via USER_DEPOSIT_CAP_SOL env var).
+      // Computed as: sum(confirmed deposits) - sum(confirmed withdrawals).
+      // Pending deposits are NOT counted so a stuck intent doesn't block
+      // future legitimate deposits, but the new intent must fit under the cap
+      // assuming it confirms.
+      const userCapSol = Number(process.env.USER_DEPOSIT_CAP_SOL ?? '100')
+      if (userCapSol > 0) {
+        const [depAgg, wdAgg] = await Promise.all([
+          db.deposit.aggregate({
+            where: { userId, status: 'CONFIRMED' },
+            _sum: { amountSol: true },
+          }),
+          db.withdrawal.aggregate({
+            where: { userId, status: 'CONFIRMED' },
+            _sum: { amountSol: true },
+          }),
+        ])
+        const netDeposited = Number(depAgg._sum.amountSol ?? 0) - Number(wdAgg._sum.amountSol ?? 0)
+        if (netDeposited + amountSol > userCapSol) {
+          const remaining = Math.max(0, userCapSol - netDeposited)
+          return reply.status(400).send({
+            error: `Per-user deposit cap of ${userCapSol} SOL would be exceeded. You can deposit up to ${remaining.toFixed(4)} SOL more.`,
+          })
+        }
+      }
+
       const feeSol = (amountSol * DEPOSIT_FEE_BPS) / 10_000
       const netAmountSol = amountSol - feeSol
 
