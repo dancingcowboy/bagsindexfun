@@ -176,10 +176,11 @@ async function processBurn(job: Job<BurnJobData>) {
         const totalBurned = totalAgg._sum.tokensBurned ?? 0n
         const action = depositId ? 'deposit' : withdrawalId ? 'withdrawal' : 'tier switch'
         const text =
+          // X limits unverified accounts to 1 cashtag per post — only the first $BAGSX.
           `🔥 Buyback & burn complete\n\n` +
           `Burned: ${formatTokens(tokensBought)} $BAGSX\n` +
           `Trigger: new ${action}\n` +
-          `Total burned to date: ${formatTokens(totalBurned)} $BAGSX\n\n` +
+          `Total burned to date: ${formatTokens(totalBurned)} BAGSX\n\n` +
           `Every deposit and withdrawal shrinks the supply.`
         const twitterId = await postTweet(text)
         await db.burnRecord.update({ where: { id: burnRecord.id }, data: { tweetId: twitterId } })

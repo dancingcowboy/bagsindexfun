@@ -22,7 +22,11 @@ const TIER_EMOJI: Record<string, string> = {
  * rather than the legacy "daily summary across all 3 tiers" tweet.
  */
 export async function postRebalanceAnnouncement(scoringCycleId: string): Promise<void> {
-  if (!process.env.TWITTER_API_KEY) return
+  console.log(`[rebalance-tweet] entry cycle=${scoringCycleId}`)
+  if (!process.env.TWITTER_API_KEY) {
+    console.log('[rebalance-tweet] no TWITTER_API_KEY — skipping')
+    return
+  }
   try {
     const cycle = await db.scoringCycle.findUnique({
       where: { id: scoringCycleId },
@@ -33,7 +37,10 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
         },
       },
     })
-    if (!cycle) return
+    if (!cycle) {
+      console.log('[rebalance-tweet] cycle not found')
+      return
+    }
 
     // Resolve which tier this cycle scored. New cycles always set `tier`;
     // legacy "score-everything" rows leave it null and we just bail.
@@ -44,7 +51,11 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
     }
 
     const tierScores = cycle.scores.filter((s) => s.riskTier === tier)
-    if (tierScores.length === 0) return
+    console.log(`[rebalance-tweet] ${tier} scores=${cycle.scores.length} tierScores=${tierScores.length}`)
+    if (tierScores.length === 0) {
+      console.log(`[rebalance-tweet] no tierScores for ${tier} — riskTiers=${[...new Set(cycle.scores.map((s) => s.riskTier))].join(',')}`)
+      return
+    }
 
     // Previous COMPLETED cycle for THIS tier — used for added/dropped diff.
     const prevCycle = await db.scoringCycle.findFirst({
@@ -62,7 +73,8 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
       },
     })
 
-    const top3 = tierScores.slice(0, 3).map((s) => `$${s.tokenSymbol}`).join(' ')
+    // X limits unverified accounts to 1 cashtag per post — use plain symbols.
+    const top3 = tierScores.slice(0, 3).map((s) => s.tokenSymbol).join(' · ')
     const prevMints = new Set((prevCycle?.scores ?? []).map((s) => s.tokenMint))
     const currentMints = new Set(tierScores.map((s) => s.tokenMint))
     const added = tierScores.filter((s) => !prevMints.has(s.tokenMint)).slice(0, 2)
@@ -85,11 +97,11 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
     const lines: string[] = [`${TIER_EMOJI[tier]} ${tier} index reshuffle`, '']
     lines.push(`Top: ${top3}`)
     const changes: string[] = []
-    if (added.length) changes.push(...added.map((s) => `+$${s.tokenSymbol}`))
-    if (dropped.length) changes.push(...dropped.map((s) => `-$${s.tokenSymbol}`))
+    if (added.length) changes.push(...added.map((s) => `+${s.tokenSymbol}`))
+    if (dropped.length) changes.push(...dropped.map((s) => `-${s.tokenSymbol}`))
     if (changes.length) lines.push(changes.join(' '))
     lines.push('')
-    lines.push(`Driver: $${topDriver.symbol} on ${topDriver.factor}.`)
+    lines.push(`Driver: ${topDriver.symbol} on ${topDriver.factor}.`)
 
     let text = lines.join('\n')
     if (text.length > 275) text = text.slice(0, 272) + '…'
