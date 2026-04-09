@@ -5,6 +5,7 @@ import {
   getMintDecimalsBatch,
   getJupiterPrices,
   getDexVolumes,
+  getLiveHoldings,
 } from '@bags-index/solana'
 import { SOL_MINT } from '@bags-index/shared'
 import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
@@ -37,54 +38,45 @@ export async function processSnapshot(_job?: Job) {
     return { snapshotsWritten: 0 }
   }
 
-  // Cache quotes by `${mint}:${amount}` — if two wallets hold the exact same
-  // amount of the same mint, reuse one call.
-  const quoteCache = new Map<string, bigint | null>()
-  async function quoteSol(mint: string, amount: string): Promise<bigint | null> {
-    const key = `${mint}:${amount}`
-    if (quoteCache.has(key)) return quoteCache.get(key)!
-    const val = await getBagsSolValue(mint, amount)
-    quoteCache.set(key, val)
-    // Be polite to the Bags API — 1000 req/hr rate limit
-    await new Promise((r) => setTimeout(r, 100))
-    return val
-  }
-
   let updatedHoldings = 0
   let snapshotsWritten = 0
   let mintsMissing = 0
 
   for (const wallet of activeWallets) {
+    let totalCostSol = wallet.holdings.reduce((s, h) => s + Number(h.costBasisSol ?? 0), 0)
+    let realizedSol = Number(wallet.realizedPnlSol ?? 0)
     let totalValueSol = 0
-    let totalCostSol = 0
-    let realizedSol = 0
+
+    // Use live read-through so every holding picks up the Bags → Dex →
+    // Jupiter fallback. Previously we called Bags directly per holding,
+    // which silently returned null for tokens with no Bags route and
+    // left `valueSolEst` stale, understating the vault's real value.
+    let live: Awaited<ReturnType<typeof getLiveHoldings>> | null = null
+    try {
+      live = await getLiveHoldings(wallet.address)
+    } catch (err) {
+      logger.error(`[price-snapshot] live-read failed for ${wallet.address.slice(0, 8)}: ${err}`)
+    }
+
+    const liveByMint = new Map<string, number>()
+    if (live) for (const h of live.holdings) liveByMint.set(h.tokenMint, h.valueSol)
 
     for (const h of wallet.holdings) {
       const amount = h.amount?.toString() ?? '0'
-      if (amount === '0') {
-        totalCostSol += Number(h.costBasisSol ?? 0)
-        realizedSol += Number(h.realizedPnlSol ?? 0)
-        continue
-      }
+      if (amount === '0') continue
 
-      const lamports = await quoteSol(h.tokenMint, amount)
-      if (lamports === null) {
+      const liveVal = liveByMint.get(h.tokenMint)
+      if (liveVal === undefined) {
         mintsMissing++
-        // Preserve prior value rather than zeroing it
+        // Preserve prior DB value rather than zeroing it
         totalValueSol += Number(h.valueSolEst ?? 0)
-        totalCostSol += Number(h.costBasisSol ?? 0)
-        realizedSol += Number(h.realizedPnlSol ?? 0)
         continue
       }
 
-      const valueSol = Number(lamports) / LAMPORTS_PER_SOL
-      totalValueSol += valueSol
-      totalCostSol += Number(h.costBasisSol ?? 0)
-      realizedSol += Number(h.realizedPnlSol ?? 0)
-
+      totalValueSol += liveVal
       await db.holding.update({
         where: { id: h.id },
-        data: { valueSolEst: valueSol.toFixed(9) },
+        data: { valueSolEst: liveVal.toFixed(9) },
       })
       updatedHoldings++
     }
@@ -191,7 +183,7 @@ export async function processSnapshot(_job?: Job) {
 
   const ms = Date.now() - started
   logger.info(
-    `[price-snapshot] done in ${ms}ms — wallets=${snapshotsWritten} holdings=${updatedHoldings} missing=${mintsMissing} quotes=${quoteCache.size}`,
+    `[price-snapshot] done in ${ms}ms — wallets=${snapshotsWritten} holdings=${updatedHoldings} missing=${mintsMissing}`,
   )
   return { snapshotsWritten, updatedHoldings, mintsMissing }
 }
