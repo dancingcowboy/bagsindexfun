@@ -473,6 +473,107 @@ export async function portfolioRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /portfolio/pnl-money-weighted?hours=168
+   *
+   * "Real" dollar-PnL per tier:
+   *    pnlSol(t) = valueSol(t) - (cumulativeDeposits(t) - cumulativeWithdrawals(t))
+   *
+   * Unlike TWR (which neutralizes cashflows to measure pure price return),
+   * this reflects the user's actual money — if they deposited 1 SOL and
+   * the vault is worth 0.6 SOL, the line reads -0.4 SOL. Per-tier.
+   * Ownership-scoped.
+   */
+  app.get<{ Querystring: { hours?: string } }>('/pnl-money-weighted', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
+      const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+      const wallets = await db.subWallet.findMany({
+        where: { userId },
+        select: { id: true, address: true, riskTier: true },
+      })
+      if (wallets.length === 0) {
+        return { success: true, data: { tiers: [], hours } }
+      }
+
+      const [snapshots, deposits, withdrawals] = await Promise.all([
+        db.pnlSnapshot.findMany({
+          where: {
+            subWalletId: { in: wallets.map((w) => w.id) },
+            createdAt: { gte: since },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { subWalletId: true, totalValueSol: true, createdAt: true },
+        }),
+        db.deposit.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          select: { riskTier: true, amountSol: true, confirmedAt: true, createdAt: true },
+        }),
+        db.withdrawal.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          select: { riskTier: true, amountSol: true, confirmedAt: true, createdAt: true },
+        }),
+      ])
+
+      // Cashflows grouped per tier, sorted ascending. We keep flows from
+      // before `since` too so the starting cumulative netflow is accurate.
+      type Flow = { t: number; amount: number }
+      const flowsByTier = new Map<string, Flow[]>()
+      for (const d of deposits) {
+        const arr = flowsByTier.get(d.riskTier) ?? []
+        arr.push({
+          t: (d.confirmedAt ?? d.createdAt).getTime(),
+          amount: Number(d.amountSol),
+        })
+        flowsByTier.set(d.riskTier, arr)
+      }
+      for (const w of withdrawals) {
+        const arr = flowsByTier.get(w.riskTier) ?? []
+        arr.push({
+          t: (w.confirmedAt ?? w.createdAt).getTime(),
+          amount: -Number(w.amountSol),
+        })
+        flowsByTier.set(w.riskTier, arr)
+      }
+      for (const arr of flowsByTier.values()) arr.sort((a, b) => a.t - b.t)
+
+      const snapsByWallet = new Map<string, typeof snapshots>()
+      for (const s of snapshots) {
+        const arr = snapsByWallet.get(s.subWalletId) ?? []
+        arr.push(s)
+        snapsByWallet.set(s.subWalletId, arr)
+      }
+
+      const tiers = wallets.map((w) => {
+        const flows = flowsByTier.get(w.riskTier) ?? []
+        const snaps = snapsByWallet.get(w.id) ?? []
+        const points = snaps.map((s) => {
+          const tMs = s.createdAt.getTime()
+          let netDeposited = 0
+          for (const f of flows) {
+            if (f.t <= tMs) netDeposited += f.amount
+            else break
+          }
+          const value = Number(s.totalValueSol)
+          return {
+            t: s.createdAt,
+            valueSol: value.toFixed(9),
+            netDepositedSol: netDeposited.toFixed(9),
+            pnlSol: (value - netDeposited).toFixed(9),
+          }
+        })
+        return { riskTier: w.riskTier, walletAddress: w.address, points }
+      })
+
+      return { success: true, data: { tiers, hours } }
+    } catch (err) {
+      app.log.error(err, 'Failed to compute money-weighted pnl')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /portfolio/token-price-history?hours=168
    * Per-token SOL price history (one sample per hour) for every token the
    * authenticated user currently holds. Each series is normalized to base

@@ -18,7 +18,7 @@ import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
-import { VaultTwrChart as TwrChart } from '@/components/VaultTwrChart'
+import { MoneyWeightedPnlChart } from '@/components/MoneyWeightedPnlChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 
@@ -196,10 +196,9 @@ export default function DashboardPage() {
             title="Vault Value"
             subtitle="SOL held per tier · hourly snapshots"
           />
-          <TwrChart
-            endpoint="/portfolio/twr-history"
-            title="Index Performance"
-            subtitle="Price-only return · deposits and withdrawals removed · base 100"
+          <MoneyWeightedPnlChart
+            title="Your PnL"
+            subtitle="Vault value minus net deposits · real SOL profit/loss per tier"
           />
         </motion.div>
 
