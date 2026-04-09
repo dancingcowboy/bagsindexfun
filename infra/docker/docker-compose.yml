@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: bags
       POSTGRES_PASSWORD: bags_dev_password
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: bags_redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -39,7 +39,7 @@ services:
     container_name: bags_adminer
     restart: unless-stopped
     ports:
-      - '8080:8080'
+      - '127.0.0.1:8080:8080'
     depends_on:
       - postgres
 
