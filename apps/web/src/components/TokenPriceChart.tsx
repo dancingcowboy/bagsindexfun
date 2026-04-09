@@ -138,6 +138,12 @@ export function TokenPriceChart({
   }, [tokens, aggPoints])
 
   const hasData = merged.length > 0
+  const lastIndexRow = useMemo(() => {
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (typeof merged[i].__INDEX__ === 'number') return i
+    }
+    return -1
+  }, [merged])
   const symbolKeys = tokens.map((t) => t.tokenSymbol ?? t.tokenMint.slice(0, 6))
 
   return (
@@ -261,8 +267,7 @@ export function TokenPriceChart({
                     position="right"
                     content={(props: unknown) => {
                       const p = props as { x?: number | string; y?: number | string; value?: number; index?: number }
-                      const lastIdx = aggPoints.length - 1
-                      if (p.index !== lastIdx || p.value == null || p.x == null || p.y == null) return null
+                      if (p.index !== lastIndexRow || p.value == null || p.x == null || p.y == null) return null
                       const x = Number(p.x)
                       const y = Number(p.y)
                       const value = p.value
