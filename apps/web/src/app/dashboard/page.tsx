@@ -2,6 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { usePrivy } from '@privy-io/react-auth'
+import { useSolanaWallets } from '@privy-io/react-auth/solana'
+import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
@@ -21,16 +23,24 @@ import { TokenPriceChart } from '@/components/TokenPriceChart'
 import { MoneyWeightedPnlChart } from '@/components/MoneyWeightedPnlChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
+import { Notice, type NoticeState } from '@/components/Notice'
+
+const SOLANA_RPC_URL =
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
 
 export default function DashboardPage() {
   const { authenticated, ready, logout, user } = usePrivy()
+  const { wallets: solanaWallets } = useSolanaWallets()
   const router = useRouter()
   const [showDeposit, setShowDeposit] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
   const [depositTier, setDepositTier] = useState<'CONSERVATIVE' | 'BALANCED' | 'DEGEN'>('BALANCED')
+  const [depositing, setDepositing] = useState(false)
+  const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [withdrawing, setWithdrawing] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
   const [portfolioLive, setPortfolioLive] = useState(false)
+  const [notice, setNotice] = useState<NoticeState | null>(null)
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
@@ -75,16 +85,68 @@ export default function DashboardPage() {
 
   const handleDeposit = async () => {
     const amount = parseFloat(depositAmount)
-    if (!amount || amount <= 0) return
+    if (!amount || amount <= 0) {
+      setNotice({ kind: 'error', title: 'Invalid amount', message: 'Enter an amount greater than 0.' })
+      return
+    }
+    const wallet = solanaWallets[0]
+    if (!wallet) {
+      setNotice({
+        kind: 'error',
+        title: 'No Solana wallet',
+        message: 'Connect a Solana wallet to deposit.',
+      })
+      return
+    }
+    if (depositing) return
+    setDepositing(true)
+    setDepositStatus('Creating deposit intent…')
     try {
       const res = await api.createDeposit(amount, depositTier)
-      // TODO: Privy wallet sign SOL transfer to sub-wallet address
-      // Then confirm: api.confirmDeposit(res.data.id, txSignature)
-      alert(`Deposit created. Send ${amount} SOL to: ${res.data.subWalletAddress}`)
+      const destination = res.data.subWalletAddress as string
+      const depositId = res.data.id as string
+
+      setDepositStatus('Building transaction…')
+      const connection = new Connection(SOLANA_RPC_URL, 'confirmed')
+      const fromPubkey = new PublicKey(wallet.address)
+      const toPubkey = new PublicKey(destination)
+      const lamports = Math.round(amount * LAMPORTS_PER_SOL)
+
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+      const tx = new Transaction({ feePayer: fromPubkey, blockhash, lastValidBlockHeight }).add(
+        SystemProgram.transfer({ fromPubkey, toPubkey, lamports }),
+      )
+
+      setDepositStatus('Waiting for wallet signature…')
+      const txSignature = await wallet.sendTransaction!(tx, connection)
+
+      setDepositStatus('Confirming on-chain…')
+      await connection.confirmTransaction(
+        { signature: txSignature, blockhash, lastValidBlockHeight },
+        'confirmed',
+      )
+
+      setDepositStatus('Notifying backend…')
+      await api.confirmDeposit(depositId, txSignature)
+
       setShowDeposit(false)
       setDepositAmount('')
+      setDepositStatus(null)
+      setNotice({
+        kind: 'success',
+        title: 'Deposit confirmed',
+        message: `${amount} SOL sent to your ${depositTier} vault. Allocation will begin shortly.`,
+      })
+      refetchPortfolio()
     } catch (err: any) {
-      alert(err.message)
+      setDepositStatus(null)
+      setNotice({
+        kind: 'error',
+        title: 'Deposit failed',
+        message: err?.message ?? 'Unknown error',
+      })
+    } finally {
+      setDepositing(false)
     }
   }
 
@@ -93,10 +155,14 @@ export default function DashboardPage() {
     setWithdrawing(true)
     try {
       const res = await api.createWithdrawal()
-      alert(`Withdrawal initiated. Estimated: ${res.data.netSol} SOL after fees.`)
+      setNotice({
+        kind: 'success',
+        title: 'Withdrawal initiated',
+        message: `Estimated ${res.data.netSol} SOL after fees. It will land in your wallet shortly.`,
+      })
       refetchPortfolio()
     } catch (err: any) {
-      alert(err.message)
+      setNotice({ kind: 'error', title: 'Withdrawal failed', message: err?.message ?? 'Unknown error' })
     } finally {
       setWithdrawing(false)
     }
@@ -322,16 +388,27 @@ export default function DashboardPage() {
                   className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-3 font-[family-name:var(--font-mono)] text-lg outline-none focus:border-[var(--color-accent)]"
                 />
               </div>
+              {depositStatus && (
+                <div className="mb-3 rounded-md border border-[var(--color-border)] bg-black/20 px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                  {depositStatus}
+                </div>
+              )}
               <div className="flex gap-3">
-                <button onClick={handleDeposit} className="btn-primary flex-1">
-                  Deposit
+                <button
+                  onClick={handleDeposit}
+                  disabled={depositing}
+                  className="btn-primary flex-1 disabled:opacity-50"
+                >
+                  {depositing ? 'Depositing…' : 'Deposit'}
                 </button>
                 <button
                   onClick={() => {
+                    if (depositing) return
                     setShowDeposit(false)
                     setDepositAmount('')
                   }}
-                  className="btn-outline flex-1"
+                  disabled={depositing}
+                  className="btn-outline flex-1 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -503,6 +580,7 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       </div>
+      <Notice notice={notice} onClose={() => setNotice(null)} />
     </div>
   )
 }

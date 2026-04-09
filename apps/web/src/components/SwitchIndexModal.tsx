@@ -44,6 +44,13 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
   const [toTier, setToTier] = useState<Tier | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<null | {
+    fromTier: Tier
+    toTier: Tier
+    sourceValueSol: string
+    feeSol: string
+    estimatedSavingsSol: string
+  }>(null)
 
   const eligibleFrom = useMemo(
     () => tiers.filter((t) => parseFloat(t.totalValueSol) > 0),
@@ -72,18 +79,14 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
     setError(null)
     try {
       const res = await api.createSwitch(fromTier, toTier)
-      alert(
-        `Switch started.\n\n` +
-          `From: ${fromTier}\n` +
-          `To: ${toTier}\n` +
-          `Source value: ${res.data.sourceValueSol} SOL\n` +
-          `Fee: ${res.data.feeSol} SOL\n` +
-          `Estimated savings vs withdraw+deposit: ${res.data.estimatedSavingsSol} SOL`,
-      )
+      setSuccess({
+        fromTier,
+        toTier,
+        sourceValueSol: res.data.sourceValueSol,
+        feeSol: res.data.feeSol,
+        estimatedSavingsSol: res.data.estimatedSavingsSol,
+      })
       onSwitched?.()
-      onClose()
-      setFromTier(null)
-      setToTier(null)
     } catch (err: any) {
       setError(err?.message ?? 'Failed to switch')
     } finally {
@@ -91,10 +94,18 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
     }
   }
 
+  const handleClose = () => {
+    onClose()
+    setFromTier(null)
+    setToTier(null)
+    setSuccess(null)
+    setError(null)
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         className="card w-full max-w-lg p-0 overflow-hidden"
@@ -108,13 +119,41 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
             </h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-[var(--color-text-muted)] hover:text-white transition"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
+        {success ? (
+          <div className="p-6 space-y-4">
+            <div className="rounded-lg border border-[#00D62B]/40 bg-[#00D62B]/10 p-4">
+              <div className="text-sm font-bold text-[#00D62B] mb-2">Switch started</div>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-text-muted)]">From → To</span>
+                  <span className="font-mono">{success.fromTier} → {success.toTier}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-text-muted)]">Source value</span>
+                  <span className="font-mono">{success.sourceValueSol} SOL</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--color-text-muted)]">Fee</span>
+                  <span className="font-mono">{success.feeSol} SOL</span>
+                </div>
+                <div className="flex justify-between border-t border-[#00D62B]/30 pt-1.5">
+                  <span className="text-[#00D62B]">Estimated savings</span>
+                  <span className="font-mono text-[#00D62B]">+{success.estimatedSavingsSol} SOL</span>
+                </div>
+              </div>
+            </div>
+            <button onClick={handleClose} className="btn-primary w-full text-sm">
+              Done
+            </button>
+          </div>
+        ) : (
         <div className="p-6 space-y-5">
           <p className="text-sm text-[var(--color-text-muted)]">
             Move your position between indexes in a single on-chain operation.
@@ -233,7 +272,7 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
 
           <div className="flex gap-3">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="btn-outline flex-1 text-sm"
               disabled={submitting}
             >
@@ -255,6 +294,7 @@ export function SwitchIndexModal({ open, onClose, tiers, onSwitched }: Props) {
             </p>
           )}
         </div>
+        )}
       </div>
     </div>
   )
