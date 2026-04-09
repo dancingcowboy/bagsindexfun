@@ -565,26 +565,6 @@ export default function LandingPage() {
         </p>
       </section>
 
-      {/* ─── Fee Transparency ─────────────────────────────────────────── */}
-      <section className="mx-auto max-w-7xl px-6 py-24">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold">Fee Structure</h2>
-        </div>
-        <div className="max-w-md mx-auto">
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 text-center">
-            <div className="text-4xl font-bold" style={{ color: '#00D62B' }}>
-              8%
-            </div>
-            <div className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              $BAGSX
-            </div>
-            <div className="mt-3 text-xs text-[var(--color-text-muted)]">
-              Every vault holds 8% exposure to the platform token. No deposit or withdrawal fees.
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* ─── Built With ───────────────────────────────────────────────── */}
       <section className="mx-auto max-w-7xl px-6 py-24 text-center">
         <h2 className="text-3xl font-bold mb-4">Powered By</h2>
