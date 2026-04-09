@@ -139,6 +139,13 @@ export async function adminRoutes(app: FastifyInstance) {
       // Chain TWR. Snapshots already include the cashflow in totalValueSol,
       // so subtract any flows that arrived in (prev, cur] before computing
       // the return.
+      //
+      // Outlier guard: any sub-period return outside [-50%, +200%] in a
+      // single hour is almost certainly a snapshot artifact (pre-allocation
+      // zero, drifted amount that got reconciled, RPC blip, etc.) — not a
+      // real price move. Clamp it to step=1 so it can't poison the chain.
+      const MIN_STEP = 0.5
+      const MAX_STEP = 3.0
       const points: { t: string; twr: number; valueSol: number }[] = []
       let index = 100
       points.push({
@@ -161,8 +168,8 @@ export async function adminRoutes(app: FastifyInstance) {
         if (v0 > 0) {
           const adj = v1 - cf
           step = adj / v0
-          // Guard against negative/zero from rounding or stale snapshots
           if (!isFinite(step) || step <= 0) step = 1
+          if (step < MIN_STEP || step > MAX_STEP) step = 1
         }
         index *= step
         points.push({ t: cur.createdAt.toISOString(), twr: index, valueSol: v1 })

@@ -442,6 +442,11 @@ export async function portfolioRoutes(app: FastifyInstance) {
         })
       }
 
+      // Outlier guard: clamp implausible single-hour returns to step=1.
+      // Pre-allocation zero snapshots, reconciled amount drift, and RPC
+      // blips would otherwise poison the chain.
+      const MIN_STEP = 0.5
+      const MAX_STEP = 3.0
       const points: { t: string; twr: number; valueSol: number }[] = []
       let index = 100
       points.push({ t: merged[0].t.toISOString(), twr: 100, valueSol: merged[0].v })
@@ -457,6 +462,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
           const adj = cur.v - cf
           step = adj / prev.v
           if (!isFinite(step) || step <= 0) step = 1
+          if (step < MIN_STEP || step > MAX_STEP) step = 1
         }
         index *= step
         points.push({ t: cur.t.toISOString(), twr: index, valueSol: cur.v })
