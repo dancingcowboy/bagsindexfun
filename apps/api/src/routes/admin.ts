@@ -263,6 +263,51 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * POST /admin/rebuild-vault-pnl?hours=48 — wipe the last N hours of
+   * PnlSnapshot + TokenPriceSnapshot rows for the protocol vault's
+   * sub-wallets and enqueue a fresh snapshot. Use this after fixing a
+   * pricing bug so the charts don't keep showing the stale history.
+   * Admin-only (preHandler enforces).
+   */
+  app.post<{ Querystring: { hours?: string } }>(
+    '/rebuild-vault-pnl',
+    async (req, reply) => {
+      try {
+        const hours = Math.min(
+          Math.max(parseInt(req.query.hours ?? '48', 10) || 48, 1),
+          24 * 30,
+        )
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+        const vaultUser = await db.user.findFirst({
+          where: { privyUserId: 'system:protocol-vault' },
+          include: { subWallets: { select: { id: true } } },
+        })
+        if (!vaultUser) {
+          return reply.status(404).send({ error: 'Protocol vault not found' })
+        }
+        const wids = vaultUser.subWallets.map((w) => w.id)
+        if (wids.length === 0) {
+          return { success: true, data: { deleted: 0, jobId: null } }
+        }
+
+        const deleted = await db.pnlSnapshot.deleteMany({
+          where: { subWalletId: { in: wids }, createdAt: { gte: since } },
+        })
+
+        const job = await priceSnapshotQueue.add('manual-snapshot', {})
+        return {
+          success: true,
+          data: { deletedSnapshots: deleted.count, hours, jobId: job.id },
+        }
+      } catch (err) {
+        app.log.error(err, 'Failed to rebuild vault pnl')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * GET /admin/vault — protocol vault holdings, deposits, burns summary.
    * Admin-only; returns the system:protocol-vault user's sub-wallets,
    * token holdings, and fee-claim history.

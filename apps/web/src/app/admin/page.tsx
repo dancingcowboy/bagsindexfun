@@ -679,7 +679,29 @@ export default function AdminPage() {
               </Panel>
             ) : (
               <>
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Wipe last 48h of vault PnL snapshots and rebuild with current prices? Use this after a pricing bug fix.')) return
+                      try {
+                        const res = await fetch(`${API_BASE}/admin/rebuild-vault-pnl?hours=48`, {
+                          method: 'POST',
+                          credentials: 'include',
+                          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                          body: '{}',
+                        })
+                        const body = await res.json()
+                        if (!res.ok) throw new Error(body?.error || `${res.status}`)
+                        alert(`Deleted ${body.data?.deletedSnapshots ?? 0} stale snapshots. Fresh snapshot queued — charts will populate in ~30s.`)
+                        setTimeout(() => vault.refetch(), 15_000)
+                      } catch (e: any) {
+                        alert(`Failed: ${e?.message ?? e}`)
+                      }
+                    }}
+                    className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase hover:bg-[var(--color-bg-hover)]"
+                  >
+                    Rebuild PnL (48h)
+                  </button>
                   <button
                     onClick={() => {
                       setVaultLive(true)
