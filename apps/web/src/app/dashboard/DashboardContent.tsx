@@ -41,7 +41,10 @@ export default function DashboardPage() {
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [withdrawing, setWithdrawing] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
-  const [portfolioLive, setPortfolioLive] = useState(false)
+  // Default to live mode so totalValueSol includes the sub-wallet's native
+  // SOL balance (unspent after liquidity-cap clamps) and uses current prices
+  // instead of stale valueSolEst from DB.
+  const [portfolioLive, setPortfolioLive] = useState(true)
   const [notice, setNotice] = useState<NoticeState | null>(null)
 
   useEffect(() => {
@@ -500,8 +503,11 @@ export default function DashboardPage() {
                       key={h.tokenMint}
                       className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)]"
                     >
-                      <td className="px-6 py-4 font-[family-name:var(--font-mono)] text-sm">
-                        {h.tokenMint.slice(0, 8)}...
+                      <td className="px-6 py-4 text-sm">
+                        <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
+                        <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                          {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right font-[family-name:var(--font-mono)] text-sm">
                         {Number(h.amount).toLocaleString()}
