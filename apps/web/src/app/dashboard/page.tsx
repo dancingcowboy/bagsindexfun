@@ -13,7 +13,6 @@ import {
   History,
   RefreshCw,
   Shuffle,
-  Clock,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
@@ -21,6 +20,7 @@ import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
 import { VaultTwrChart as TwrChart } from '@/components/VaultTwrChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
+import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 
 export default function DashboardPage() {
   const { authenticated, ready, logout, user } = usePrivy()
@@ -67,30 +67,6 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
   })
 
-  const { data: scheduleData } = useQuery({
-    queryKey: ['index-schedule'],
-    queryFn: () => api.getIndexSchedule(),
-    refetchInterval: 60_000,
-  })
-
-  // Tick every second so the countdown updates live without re-fetching.
-  const [nowMs, setNowMs] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  const formatCountdown = (target: string | null) => {
-    if (!target) return '—'
-    const diff = new Date(target).getTime() - nowMs
-    if (diff <= 0) return 'due now'
-    const h = Math.floor(diff / 3_600_000)
-    const m = Math.floor((diff % 3_600_000) / 60_000)
-    const s = Math.floor((diff % 60_000) / 1000)
-    if (h > 0) return `${h}h ${m}m ${s}s`
-    if (m > 0) return `${m}m ${s}s`
-    return `${s}s`
-  }
 
   const holdings = portfolio?.data?.holdings ?? []
   const totalValueSol = portfolio?.data?.totalValueSol ?? '0'
@@ -209,26 +185,21 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
-        {/* PnL History Chart */}
+        {/* Vault value + performance — side by side */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="mb-8"
+          className="mb-8 grid grid-cols-1 lg:grid-cols-2 gap-6"
         >
-          <PnlHistoryChart />
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.07 }}
-          className="mb-8"
-        >
+          <PnlHistoryChart
+            title="Vault Value"
+            subtitle="SOL held per tier · hourly snapshots"
+          />
           <TwrChart
             endpoint="/portfolio/twr-history"
-            title="Your Time-Weighted Return"
-            subtitle="Pure price performance · deposits and withdrawals neutralized · base 100"
+            title="Index Performance"
+            subtitle="Price-only return · deposits and withdrawals removed · base 100"
           />
         </motion.div>
 
@@ -452,35 +423,7 @@ export default function DashboardPage() {
           transition={{ delay: 0.15 }}
           className="mb-8"
         >
-          <div className="flex items-center gap-2 mb-4">
-            <Clock className="h-5 w-5 text-[var(--color-text-muted)]" />
-            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
-              Next Cycle
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((tier) => {
-              const row = scheduleData?.data?.find((r) => r.tier === tier)
-              return (
-                <div key={tier} className="card">
-                  <div className="text-xs uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
-                    {tier}
-                  </div>
-                  <div className="font-mono text-2xl font-bold tabular-nums">
-                    {formatCountdown(row?.nextScoringAt ?? null)}
-                  </div>
-                  <div className="text-xs text-[var(--color-text-muted)] mt-1">
-                    {row?.lastScoredAt
-                      ? `last ${new Date(row.lastScoredAt).toLocaleString()}`
-                      : 'no cycle yet'}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <p className="text-xs text-[var(--color-text-muted)] mt-2">
-            Rebalance fires after scoring if the top-10 composition changes.
-          </p>
+          <NextCycleCountdown compact />
         </motion.div>
 
         {/* Current Index */}

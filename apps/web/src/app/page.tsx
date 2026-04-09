@@ -17,7 +17,8 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
-import { IndexChart } from '@/components/IndexChart'
+import { TokenPriceChart } from '@/components/TokenPriceChart'
+import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { AgentAnalysis } from '@/components/AgentAnalysis'
 import { TierProvider } from '@/lib/TierContext'
 
@@ -205,7 +206,15 @@ export default function LandingPage() {
               is the Bags Index for that tier. Diversification in action.
             </p>
           </div>
-          <IndexChart />
+          <TokenPriceChart
+            tierSelectable
+            title="Live Tier Performance"
+            subtitle="Top-10 token prices + weighted index line · switch tiers to compare"
+          />
+
+          <div className="mt-16">
+            <NextCycleCountdown />
+          </div>
         </motion.div>
       </section>
 
