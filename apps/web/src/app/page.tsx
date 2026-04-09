@@ -530,7 +530,7 @@ export default function LandingPage() {
             {
               step: '3',
               title: '8% $BAGSX slice',
-              desc: 'Every vault — user and protocol — holds a fixed 8% exposure to $BAGSX. No fees, no burns.',
+              desc: 'Every vault — user and protocol — holds a fixed 8% exposure to $BAGSX. No fees.',
             },
           ].map((s) => (
             <div
