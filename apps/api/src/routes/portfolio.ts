@@ -264,8 +264,28 @@ export async function portfolioRoutes(app: FastifyInstance) {
         where: { userId },
         include: { holdings: true },
       })
+
+      // Live value per wallet (token value + native SOL). Falls back to the
+      // DB snapshot when the Helius/price fetch fails so the PnL card never
+      // goes blank on a transient RPC hiccup.
+      const { getLiveHoldings } = await import('@bags-index/solana')
+      const liveByWallet = new Map<string, number>()
+      await Promise.all(
+        wallets.map(async (w) => {
+          try {
+            const live = await getLiveHoldings(w.address)
+            const tokenValue = live.holdings.reduce((s, h) => s + h.valueSol, 0)
+            liveByWallet.set(w.id, tokenValue + live.nativeSol)
+          } catch (err) {
+            app.log.warn({ err, wallet: w.address }, '[pnl] live fetch failed')
+          }
+        }),
+      )
+
       const tiers = wallets.map((w) => {
-        const currentValue = w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
+        const currentValue =
+          liveByWallet.get(w.id) ??
+          w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
         const costBasis = w.holdings.reduce((s, h) => s + Number(h.costBasisSol), 0)
         const realized = Number(w.realizedPnlSol)
         const unrealized = currentValue - costBasis
