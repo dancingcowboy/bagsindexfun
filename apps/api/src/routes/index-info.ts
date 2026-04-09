@@ -124,52 +124,39 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10), 1), 24 * 90)
         const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
-        // 1. Load scoring cycles that could be active in the range (one
-        //    before `since` too, so the earliest bucket has weights).
-        const cycles = await db.scoringCycle.findMany({
+        // 1. Use the LATEST completed cycle's top-10 as a constant basket
+        //    for the whole window. Earlier approach used the cycle active
+        //    at each bucket time, but that means tokens added in today's
+        //    cycle (e.g. PRIMIS in CONSERVATIVE) get weight 0 for older
+        //    buckets and their later spikes never enter the index. The
+        //    intuitive view is "how would today's top 10 have performed
+        //    over the past N hours" — same convention as the per-token
+        //    chart below.
+        const latestCycle = await db.scoringCycle.findFirst({
           where: { status: 'COMPLETED', completedAt: { not: null } },
-          orderBy: { completedAt: 'asc' },
-          select: { id: true, completedAt: true },
+          orderBy: { completedAt: 'desc' },
+          select: { id: true },
         })
-        if (cycles.length === 0) {
+        if (!latestCycle) {
           return { success: true, data: { tier, points: [] } }
         }
-
-        // 2. Load all tier top-10 weights per cycle we care about.
-        const cycleIds = cycles.map((c) => c.id)
         const scores = await db.tokenScore.findMany({
           where: {
-            cycleId: { in: cycleIds },
+            cycleId: latestCycle.id,
             riskTier: tier,
             isBlacklisted: false,
             rank: { gte: 1, lte: 10 },
           },
-          select: {
-            cycleId: true,
-            tokenMint: true,
-            compositeScore: true,
-          },
+          select: { tokenMint: true, compositeScore: true },
         })
-        // weights[cycleId] = Map<mint, weight>
-        const weightsByCycle = new Map<string, Map<string, number>>()
+        const weights = new Map<string, number>()
+        const totalScore = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
         for (const s of scores) {
-          let m = weightsByCycle.get(s.cycleId)
-          if (!m) {
-            m = new Map()
-            weightsByCycle.set(s.cycleId, m)
-          }
-          m.set(s.tokenMint, Number(s.compositeScore))
-        }
-        // Normalize in case compositeScore doesn't exactly sum to 1
-        for (const m of weightsByCycle.values()) {
-          const tot = [...m.values()].reduce((a, b) => a + b, 0) || 1
-          for (const [k, v] of m) m.set(k, v / tot)
+          weights.set(s.tokenMint, Number(s.compositeScore) / totalScore)
         }
 
-        // 3. Load all price snapshots for mints that ever appeared in a
-        //    tier cycle, within a slightly padded range.
-        const allMints = new Set<string>()
-        for (const m of weightsByCycle.values()) for (const k of m.keys()) allMints.add(k)
+        // 2. Load price snapshots for the basket mints over the window.
+        const allMints = new Set<string>(weights.keys())
         if (allMints.size === 0) {
           return { success: true, data: { tier, points: [] } }
         }
@@ -236,36 +223,17 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           orderedTimes.push(t)
         }
 
-        // 6. Active cycle resolver (latest completedAt ≤ bucket time).
-        const cycleForTime = (t: number): string | null => {
-          let chosen: string | null = null
-          for (const c of cycles) {
-            if (c.completedAt && c.completedAt.getTime() <= t) chosen = c.id
-            else break
-          }
-          return chosen
-        }
-
-        // 7. Chain weighted returns across consecutive buckets, using
-        //    forward-filled per-mint prices. For each pair (prev, cur),
-        //    the step return is the weight-renormalized average of
-        //    (price_cur / price_prev − 1) over the active tier weights.
+        // 6. Chain weighted returns across consecutive buckets using the
+        //    constant latest-cycle basket and forward-filled per-mint prices.
         const points: { t: string; indexed: number }[] = []
         let index = 100
         let started = false
         let prevTime = -1
         for (const t of orderedTimes) {
           if (!started) {
-            // Wait until at least one weighted token has a price at this time
-            const cycleId = cycleForTime(t)
-            const weights = cycleId ? weightsByCycle.get(cycleId) : null
-            if (!weights) continue
             let any = false
             for (const mint of weights.keys()) {
-              if (priceAt(mint, t) !== null) {
-                any = true
-                break
-              }
+              if (priceAt(mint, t) !== null) { any = true; break }
             }
             if (!any) continue
             started = true
@@ -274,13 +242,6 @@ export async function indexInfoRoutes(app: FastifyInstance) {
             continue
           }
 
-          const cycleId = cycleForTime(prevTime)
-          const weights = cycleId ? weightsByCycle.get(cycleId) : null
-          if (!weights || weights.size === 0) {
-            points.push({ t: new Date(t).toISOString(), indexed: index })
-            prevTime = t
-            continue
-          }
           let stepRet = 0
           let wSum = 0
           for (const [mint, w] of weights) {
