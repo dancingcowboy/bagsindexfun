@@ -185,25 +185,58 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           return { success: true, data: { tier, points: [] } }
         }
 
-        // 4. Bucket by hour (floor to hour). Collect mint→price for each bucket.
-        const bucketKey = (d: Date) => {
-          const x = new Date(d)
-          x.setMinutes(0, 0, 0)
-          return x.toISOString()
-        }
-        const buckets = new Map<string, Map<string, number>>()
+        // 4. Build per-mint sorted price series for forward-filling. Each
+        //    mint typically only has one sample per hour, and not every
+        //    mint samples on the same hour boundary, so the previous
+        //    "tokens in BOTH adjacent buckets" approach gave near-empty
+        //    overlap and a flat index line. Instead, for each hour bucket
+        //    we look up each weighted token's last-known price (≤ bucket
+        //    time). Tokens with no observation yet are skipped for that
+        //    bucket only.
+        const seriesByMint = new Map<string, { t: number; price: number }[]>()
         for (const s of samples) {
-          const k = bucketKey(s.createdAt)
-          let m = buckets.get(k)
-          if (!m) {
-            m = new Map()
-            buckets.set(k, m)
-          }
-          m.set(s.tokenMint, Number(s.priceSol))
+          const arr = seriesByMint.get(s.tokenMint) ?? []
+          arr.push({ t: s.createdAt.getTime(), price: Number(s.priceSol) })
+          seriesByMint.set(s.tokenMint, arr)
         }
-        const orderedKeys = [...buckets.keys()].sort()
+        // samples are already orderBy createdAt asc, so per-mint arrays are sorted
 
-        // 5. For each bucket, find the active cycle (latest completedAt <= bucket time).
+        const priceAt = (mint: string, t: number): number | null => {
+          const arr = seriesByMint.get(mint)
+          if (!arr || arr.length === 0) return null
+          // Binary search for the largest entry with t <= target
+          let lo = 0
+          let hi = arr.length - 1
+          let chosen = -1
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1
+            if (arr[mid].t <= t) {
+              chosen = mid
+              lo = mid + 1
+            } else {
+              hi = mid - 1
+            }
+          }
+          if (chosen < 0) return null
+          return arr[chosen].price
+        }
+
+        // 5. Build an ordered list of hourly bucket timestamps spanning
+        //    the full range, regardless of whether any sample landed
+        //    exactly on that hour. Start at the first hour ≥ since.
+        const startBucket = new Date(since)
+        startBucket.setMinutes(0, 0, 0)
+        // If the first bucket has no observation for any weighted token,
+        // step forward until one does.
+        const HOUR = 60 * 60 * 1000
+        const nowFloor = new Date()
+        nowFloor.setMinutes(0, 0, 0)
+        const orderedTimes: number[] = []
+        for (let t = startBucket.getTime(); t <= nowFloor.getTime(); t += HOUR) {
+          orderedTimes.push(t)
+        }
+
+        // 6. Active cycle resolver (latest completedAt ≤ bucket time).
         const cycleForTime = (t: number): string | null => {
           let chosen: string | null = null
           for (const c of cycles) {
@@ -213,44 +246,57 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           return chosen
         }
 
-        // 6. Chain weighted returns. For each pair of consecutive buckets,
-        //    use the weights active at the START of the step and take the
-        //    weighted sum of per-token returns for tokens present in BOTH
-        //    buckets. Missing tokens on either side contribute 0 weight to
-        //    that step (weights are renormalized over the overlap).
+        // 7. Chain weighted returns across consecutive buckets, using
+        //    forward-filled per-mint prices. For each pair (prev, cur),
+        //    the step return is the weight-renormalized average of
+        //    (price_cur / price_prev − 1) over the active tier weights.
         const points: { t: string; indexed: number }[] = []
         let index = 100
-        points.push({ t: orderedKeys[0], indexed: 100 })
-        for (let i = 1; i < orderedKeys.length; i++) {
-          const prevKey = orderedKeys[i - 1]
-          const curKey = orderedKeys[i]
-          const prev = buckets.get(prevKey)!
-          const cur = buckets.get(curKey)!
-          const cycleId = cycleForTime(new Date(prevKey).getTime())
-          const weights = cycleId ? weightsByCycle.get(cycleId) : null
-          if (!weights || weights.size === 0) {
-            points.push({ t: curKey, indexed: index })
+        let started = false
+        let prevTime = -1
+        for (const t of orderedTimes) {
+          if (!started) {
+            // Wait until at least one weighted token has a price at this time
+            const cycleId = cycleForTime(t)
+            const weights = cycleId ? weightsByCycle.get(cycleId) : null
+            if (!weights) continue
+            let any = false
+            for (const mint of weights.keys()) {
+              if (priceAt(mint, t) !== null) {
+                any = true
+                break
+              }
+            }
+            if (!any) continue
+            started = true
+            prevTime = t
+            points.push({ t: new Date(t).toISOString(), indexed: 100 })
             continue
           }
-          // Overlap weights (tokens present in both buckets AND in the active cycle)
-          const overlap: Array<{ w: number; ret: number }> = []
-          let wSum = 0
-          for (const [mint, w] of weights) {
-            const p0 = prev.get(mint)
-            const p1 = cur.get(mint)
-            if (p0 && p1 && p0 > 0) {
-              overlap.push({ w, ret: p1 / p0 - 1 })
-              wSum += w
-            }
-          }
-          if (wSum === 0) {
-            points.push({ t: curKey, indexed: index })
+
+          const cycleId = cycleForTime(prevTime)
+          const weights = cycleId ? weightsByCycle.get(cycleId) : null
+          if (!weights || weights.size === 0) {
+            points.push({ t: new Date(t).toISOString(), indexed: index })
+            prevTime = t
             continue
           }
           let stepRet = 0
-          for (const o of overlap) stepRet += (o.w / wSum) * o.ret
-          index = index * (1 + stepRet)
-          points.push({ t: curKey, indexed: index })
+          let wSum = 0
+          for (const [mint, w] of weights) {
+            const p0 = priceAt(mint, prevTime)
+            const p1 = priceAt(mint, t)
+            if (p0 !== null && p1 !== null && p0 > 0) {
+              stepRet += w * (p1 / p0 - 1)
+              wSum += w
+            }
+          }
+          if (wSum > 0) {
+            stepRet /= wSum
+            index = index * (1 + stepRet)
+          }
+          points.push({ t: new Date(t).toISOString(), indexed: index })
+          prevTime = t
         }
 
         return { success: true, data: { tier, points } }
