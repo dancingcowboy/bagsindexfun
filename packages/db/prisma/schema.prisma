@@ -197,9 +197,13 @@ model ScoringCycle {
   completedAt     DateTime?        @map("completed_at")
   tokenCount      Int              @default(0) @map("token_count")
   status          String           @default("RUNNING")
+  /// Which tier this cycle scored. NULL on legacy rows that scored all tiers
+  /// in one pass; new rows always set a single tier.
+  tier            RiskTier?        @map("tier")
   scores          TokenScore[]
   rebalanceCycles RebalanceCycle[]
 
+  @@index([tier, completedAt])
   @@map("scoring_cycles")
 }
 

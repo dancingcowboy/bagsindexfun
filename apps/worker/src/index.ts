@@ -34,12 +34,33 @@ const priceSnapshotWorker = createPriceSnapshotWorker()
 const switchWorker = createSwitchWorker()
 const vaultSwitchWorker = createVaultSwitchWorker()
 
-// Schedule daily scoring at 00:00 UTC
+// Per-tier scoring on offset intervals — DEGEN every 4h23m, BALANCED every
+// 12h08m, CONSERVATIVE every 23h23m. Offsets stagger the three tiers so they
+// rarely fire together; combined with rebalance batching this lets the system
+// scale comfortably past 100 wallets without overlapping load on Bags API.
 const scoringQueue = new Queue(QUEUE_SCORING, { connection: redis })
+const HOUR_MS = 60 * 60 * 1000
+const MIN_MS = 60 * 1000
+// Remove the legacy "score everything once a day" scheduler if it still exists
+try {
+  await scoringQueue.removeJobScheduler('daily-scoring')
+} catch {
+  /* fine if it didn't exist */
+}
 await scoringQueue.upsertJobScheduler(
-  'daily-scoring',
-  { pattern: '0 0 * * *' },
-  { name: 'daily-scoring' }
+  'tier-scoring-DEGEN',
+  { every: 4 * HOUR_MS + 23 * MIN_MS },
+  { name: 'tier-scoring-DEGEN', data: { tier: 'DEGEN' } },
+)
+await scoringQueue.upsertJobScheduler(
+  'tier-scoring-BALANCED',
+  { every: 12 * HOUR_MS + 8 * MIN_MS },
+  { name: 'tier-scoring-BALANCED', data: { tier: 'BALANCED' } },
+)
+await scoringQueue.upsertJobScheduler(
+  'tier-scoring-CONSERVATIVE',
+  { every: 23 * HOUR_MS + 23 * MIN_MS },
+  { name: 'tier-scoring-CONSERVATIVE', data: { tier: 'CONSERVATIVE' } },
 )
 
 // Schedule daily AI analysis at 00:30 UTC (after scoring completes)

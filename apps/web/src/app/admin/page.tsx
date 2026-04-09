@@ -40,6 +40,15 @@ interface Overview {
     burns: { total: number; solSpent: string }
     projectVaults: { total: number; totalSolReceived: string; currentValueSol: string }
     blacklist: { count: number }
+    capacity: {
+      tier: string
+      current: number
+      max: number
+      pct: number
+      intervalHours: number
+      batchSize: number
+      batchIntervalHours: number
+    }[]
     scoring: {
       latestCycle: { id: string; status: string; startedAt: string; completedAt: string | null; tokenCount: number } | null
       queueWaiting: number
@@ -337,6 +346,48 @@ export default function AdminPage() {
                   <Stat icon={<Activity className="h-4 w-4" />} label="Fees Collected" value={`${fmt(Number(o.deposits.totalFeeSol) + Number(o.withdrawals.totalFeeSol))} SOL`} sub={`${fmt(o.deposits.totalFeeSol)} deposit · ${fmt(o.withdrawals.totalFeeSol)} withdrawal`} />
                   <Stat icon={<Flame className="h-4 w-4" />} label="Tokens Burned" value={`${fmt(o.burns.solSpent)} SOL`} sub={`${o.burns.total} burns`} />
                 </div>
+
+                {/* Per-tier capacity vs ceiling. Ceiling = batch_size × tier_interval_h.
+                    When current/max approaches 100% we either bump batch size, shorten the
+                    batch interval, or add another worker process. */}
+                <Panel title="Tier Capacity (wallets / max per scoring interval)">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {o.capacity?.map((c) => {
+                      const pct = c.pct
+                      const tone = pct >= 90 ? '#ff5555' : pct >= 70 ? '#ff8c00' : '#00D62B'
+                      return (
+                        <div key={c.tier} className="rounded-lg border border-[var(--color-border-subtle)] p-3">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                              style={{ color: TIER_COLOR[c.tier], backgroundColor: `${TIER_COLOR[c.tier]}15` }}
+                            >
+                              {c.tier}
+                            </span>
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              every {c.intervalHours}h
+                            </span>
+                          </div>
+                          <div className="mt-2 flex items-baseline gap-1.5 font-[family-name:var(--font-mono)]">
+                            <span className="text-xl font-bold" style={{ color: tone }}>
+                              {c.current}
+                            </span>
+                            <span className="text-sm text-[var(--color-text-muted)]">/ {c.max}</span>
+                          </div>
+                          <div className="mt-2 h-1.5 rounded-full bg-[var(--color-border-subtle)]">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{ width: `${Math.min(100, pct)}%`, backgroundColor: tone }}
+                            />
+                          </div>
+                          <div className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
+                            {c.batchSize} wallets / {c.batchIntervalHours}h batch · {pct}% used
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </Panel>
 
                 {/* Tier breakdown */}
                 <Panel title="Deposits by Tier">

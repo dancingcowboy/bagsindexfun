@@ -666,6 +666,7 @@ export async function adminRoutes(app: FastifyInstance) {
         users24h,
         users7d,
         subWalletCount,
+        subWalletsByTier,
         depositTotals,
         depositAgg,
         deposit24hAgg,
@@ -685,6 +686,10 @@ export async function adminRoutes(app: FastifyInstance) {
         db.user.count({ where: { createdAt: { gte: since24h } } }),
         db.user.count({ where: { createdAt: { gte: since7d } } }),
         db.subWallet.count(),
+        db.subWallet.groupBy({
+          by: ['riskTier'],
+          _count: true,
+        }),
         db.deposit.groupBy({
           by: ['riskTier'],
           where: { status: 'CONFIRMED' },
@@ -769,6 +774,36 @@ export async function adminRoutes(app: FastifyInstance) {
             currentValueSol: projectVaultAgg._sum.currentValueSol?.toString() ?? '0',
           },
           blacklist: { count: blacklistCount },
+          capacity: (() => {
+            // These constants must match worker/src/workers/rebalance.worker.ts
+            // (REBALANCE_BATCH_SIZE × REBALANCE_BATCH_INTERVAL_MS) and
+            // worker/src/index.ts (per-tier scheduler intervals).
+            const BATCH_SIZE = 25
+            const BATCH_INTERVAL_HOURS = 1
+            const TIER_INTERVAL_HOURS: Record<RiskTier, number> = {
+              DEGEN: 4 + 23 / 60,
+              BALANCED: 12 + 8 / 60,
+              CONSERVATIVE: 23 + 23 / 60,
+            }
+            const countByTier: Record<string, number> = {}
+            for (const row of subWalletsByTier) {
+              countByTier[row.riskTier] = row._count
+            }
+            return RISK_TIERS.map((tier) => {
+              const intervalH = TIER_INTERVAL_HOURS[tier]
+              const max = Math.floor((BATCH_SIZE * intervalH) / BATCH_INTERVAL_HOURS)
+              const current = countByTier[tier] ?? 0
+              return {
+                tier,
+                current,
+                max,
+                pct: max > 0 ? Math.round((current / max) * 100) : 0,
+                intervalHours: Number(intervalH.toFixed(2)),
+                batchSize: BATCH_SIZE,
+                batchIntervalHours: BATCH_INTERVAL_HOURS,
+              }
+            })
+          })(),
           scoring: {
             latestCycle: latestScoring
               ? {
