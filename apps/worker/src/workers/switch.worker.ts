@@ -20,6 +20,7 @@ import {
   TIER_SCORING_CONFIG,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
+import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 
 const burnQueue = new Queue(QUEUE_BURN, { connection: redis })
 
@@ -435,6 +436,20 @@ async function processSwitch(job: Job<SwitchJobData>) {
     const naiveFee = sourceValueSol * ((WITHDRAWAL_FEE_BPS + DEPOSIT_FEE_BPS) / 10_000)
     const feeSaved = naiveFee - feeChargedSol
     const solSaved = Math.max(0, feeSaved)
+
+    // Reconcile both wallets to actual on-chain balances. The src side
+    // should be empty (or hold only kept-overlap dust); the dst side
+    // should hold the new tier basket.
+    for (const w of [srcWallet, dstWallet]) {
+      try {
+        const r = await reconcileSubWalletHoldings(w.id, w.address)
+        logger.info(
+          `[switch] reconciled ${w.address.slice(0, 8)}: u=${r.updated} i=${r.inserted} d=${r.deleted}`,
+        )
+      } catch (err) {
+        logger.error(`[switch] reconcile failed for ${w.address.slice(0, 8)}: ${err}`)
+      }
+    }
 
     await db.switchJob.update({
       where: { id: switchJobId },

@@ -17,6 +17,7 @@ import {
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { postRebalanceAnnouncement } from '../lib/rebalance-tweet.js'
+import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 
 interface RebalanceJobData {
   scoringCycleId?: string
@@ -293,6 +294,19 @@ async function processRebalance(job: Job<RebalanceJobData>) {
               )
             }
           }
+        }
+
+        // Reconcile this wallet's DB holdings to actual on-chain state
+        // before moving to the next wallet.
+        try {
+          const r = await reconcileSubWalletHoldings(wallet.id, wallet.address)
+          if (r.updated || r.inserted || r.deleted) {
+            logger.info(
+              `[rebalance] reconciled ${wallet.address.slice(0, 8)}: u=${r.updated} i=${r.inserted} d=${r.deleted}`,
+            )
+          }
+        } catch (err) {
+          logger.error(`[rebalance] reconcile failed for ${wallet.address.slice(0, 8)}: ${err}`)
         }
 
         walletsComplete++

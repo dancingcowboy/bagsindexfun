@@ -10,6 +10,7 @@ import {
   TIER_SCORING_CONFIG,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
+import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 
 interface DepositJobData {
   depositId: string
@@ -146,6 +147,17 @@ async function processDeposit(job: Job<DepositJobData>) {
       logger.error(`[deposit] Failed to buy ${score.tokenSymbol}: ${err}`)
       // Continue with other tokens — don't fail entire allocation
     }
+  }
+
+  // Reconcile DB holdings to actual on-chain SPL balances. Cost basis
+  // and realized PnL are preserved; only `amount` is rewritten.
+  try {
+    const r = await reconcileSubWalletHoldings(subWallet.id, subWallet.address)
+    logger.info(
+      `[deposit] reconciled holdings: updated=${r.updated} inserted=${r.inserted} deleted=${r.deleted}`,
+    )
+  } catch (err) {
+    logger.error(`[deposit] reconcile failed: ${err}`)
   }
 
   logger.info(`[deposit] Allocation complete for deposit ${depositId}`)

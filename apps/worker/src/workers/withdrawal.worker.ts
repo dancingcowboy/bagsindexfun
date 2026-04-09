@@ -15,6 +15,7 @@ import {
 } from '@bags-index/shared'
 import { Queue } from 'bullmq'
 import { redis } from '../queue/redis.js'
+import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 
 const burnQueue = new Queue(QUEUE_BURN, { connection: redis })
 
@@ -142,6 +143,19 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   } catch (err) {
     logger.error(`[withdrawal] SOL transfer to user failed: ${err}`)
     failedTokens++
+  }
+
+  // Reconcile DB holdings to actual on-chain SPL balances. After a
+  // withdrawal some sells may have failed (PARTIAL state) — this catches
+  // any token rows that should have been deleted but weren't, and any
+  // dust amounts left from rounding.
+  try {
+    const r = await reconcileSubWalletHoldings(subWallet.id, subWallet.address)
+    logger.info(
+      `[withdrawal] reconciled holdings: updated=${r.updated} inserted=${r.inserted} deleted=${r.deleted}`,
+    )
+  } catch (err) {
+    logger.error(`[withdrawal] reconcile failed: ${err}`)
   }
 
   // Enqueue burn for the fee

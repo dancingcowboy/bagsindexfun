@@ -16,6 +16,7 @@ import {
   type RiskTier,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
+import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 
 const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
 
@@ -334,7 +335,19 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
     }
   }
 
-  // 6. Flip the tier label in-place. Future fee-claim deposits land here.
+  // 6. Reconcile DB holdings to actual on-chain balances. The vault is
+  // a single sub-wallet; after the in-place rebalance some sells may
+  // have failed and some buys may have over/under-filled.
+  try {
+    const r = await reconcileSubWalletHoldings(vault.id, vault.address)
+    logger.info(
+      `[vault-switch] reconciled holdings: u=${r.updated} i=${r.inserted} d=${r.deleted}`,
+    )
+  } catch (err) {
+    logger.error(`[vault-switch] reconcile failed: ${err}`)
+  }
+
+  // 7. Flip the tier label in-place. Future fee-claim deposits land here.
   await db.subWallet.update({
     where: { id: vault.id },
     data: { riskTier: toTier },
