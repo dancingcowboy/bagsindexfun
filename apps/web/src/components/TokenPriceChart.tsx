@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  LabelList,
 } from 'recharts'
 import { API_BASE, authHeaders } from '@/lib/api'
 
@@ -195,7 +196,7 @@ export function TokenPriceChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={merged} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <LineChart data={merged} margin={{ top: 10, right: 70, left: 0, bottom: 0 }}>
               <CartesianGrid stroke="#1f1f1f" strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="t"
@@ -254,7 +255,31 @@ export function TokenPriceChart({
                   connectNulls
                   onMouseEnter={() => setHovered('__INDEX__')}
                   onMouseLeave={() => setHovered(null)}
-                />
+                >
+                  <LabelList
+                    dataKey="__INDEX__"
+                    position="right"
+                    content={(props: unknown) => {
+                      const p = props as { x?: number | string; y?: number | string; value?: number; index?: number }
+                      const lastIdx = aggPoints.length - 1
+                      if (p.index !== lastIdx || p.value == null || p.x == null || p.y == null) return null
+                      const x = Number(p.x)
+                      const y = Number(p.y)
+                      const value = p.value
+                      const pct = value - 100
+                      const sign = pct >= 0 ? '+' : ''
+                      const fill = pct >= 0 ? '#00D62B' : '#ff5c5c'
+                      return (
+                        <g>
+                          <rect x={x + 6} y={y - 9} rx={3} ry={3} width={56} height={18} fill="rgba(0,0,0,0.7)" stroke={fill} strokeWidth={1} />
+                          <text x={x + 34} y={y + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill={fill}>
+                            {`${sign}${pct.toFixed(2)}%`}
+                          </text>
+                        </g>
+                      )
+                    }}
+                  />
+                </Line>
               )}
             </LineChart>
           </ResponsiveContainer>
