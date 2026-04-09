@@ -30,7 +30,7 @@ const SOLANA_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
 
 export default function DashboardPage() {
-  const { authenticated, ready, logout, user } = usePrivy()
+  const { authenticated, ready, logout, user, connectWallet } = usePrivy()
   const { wallets: solanaWallets } = useConnectedStandardWallets()
   const router = useRouter()
   const [showDeposit, setShowDeposit] = useState(false)
@@ -95,11 +95,16 @@ export default function DashboardPage() {
       (activeAddress && solanaWallets.find((w) => w.address === activeAddress)) ||
       solanaWallets[0]
     if (!wallet) {
+      // Privy keeps login-with-wallet and standard-wallet session separate.
+      // Open the connect modal so the user can re-expose a Solana signer.
+      try {
+        connectWallet({ walletChainType: 'solana-only' as any })
+      } catch {}
       setNotice({
-        kind: 'error',
-        title: 'No Solana wallet detected',
+        kind: 'info',
+        title: 'Connect your Solana wallet',
         message:
-          'Your connected wallet isn\'t exposing a Solana signer. Try disconnecting and reconnecting with Phantom, Backpack, or Solflare.',
+          'Approve the wallet connection in the popup, then click Deposit again. This is a one-time reconnect so we can ask your wallet to sign the transfer.',
       })
       return
     }
