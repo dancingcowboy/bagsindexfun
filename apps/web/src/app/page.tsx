@@ -162,9 +162,9 @@ export default function LandingPage() {
                 sub: 'Degen every 4h · Balanced 12h · Conservative 24h',
               },
               {
-                label: 'Non-Custodial',
-                value: 'Privy HSM',
-                sub: 'Per-tier sub-wallets, no private keys in our DB',
+                label: 'Privy-Secured',
+                value: 'HSM Signing',
+                sub: 'Per-tier sub-wallets, withdraw anytime',
               },
             ].map((stat) => (
               <div
@@ -419,8 +419,8 @@ export default function LandingPage() {
             },
             {
               icon: <Shield className="h-5 w-5" />,
-              title: 'Non-Custodial',
-              desc: 'Funds stay in your personal sub-wallet — never pooled. HSM-backed signing via Privy Server Wallets. Zero private keys in our database. Withdraw anytime.',
+              title: 'Privy-Secured Sub-Wallets',
+              desc: 'Funds stay in your personal sub-wallet — never pooled with other users. HSM-backed signing via Privy Server Wallets. No private keys in our database. Withdraw anytime. A fully trust-minimized PDA escrow program is on the roadmap.',
             },
             {
               icon: <AlertTriangle className="h-5 w-5" />,
@@ -717,7 +717,7 @@ export default function LandingPage() {
               </svg>
             </a>
             <span className="text-xs text-[var(--color-text-muted)]">
-              Non-custodial index vault on Solana
+              Auto-rebalancing index vault on Solana
             </span>
           </div>
         </div>
