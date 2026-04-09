@@ -132,11 +132,22 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         //    intuitive view is "how would today's top 10 have performed
         //    over the past N hours" — same convention as the per-token
         //    chart below.
-        const latestCycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED', completedAt: { not: null } },
+        // Scope to the latest completed cycle *for this tier*. Per-tier
+        // scoring writes tier-scoped cycles, so a global latest-cycle
+        // lookup only returns whichever tier ran last. Fall back to any
+        // legacy tier-less cycle if no tier-scoped one exists yet.
+        let latestCycle = await db.scoringCycle.findFirst({
+          where: { status: 'COMPLETED', completedAt: { not: null }, tier },
           orderBy: { completedAt: 'desc' },
           select: { id: true },
         })
+        if (!latestCycle) {
+          latestCycle = await db.scoringCycle.findFirst({
+            where: { status: 'COMPLETED', completedAt: { not: null }, tier: null },
+            orderBy: { completedAt: 'desc' },
+            select: { id: true },
+          })
+        }
         if (!latestCycle) {
           return { success: true, data: { tier, points: [] } }
         }
@@ -288,9 +299,13 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1), 24 * 90)
         const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
-        // Latest completed cycle's top 10 for this tier
-        const cycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED' },
+        // Latest completed cycle *for this tier*. Per-tier scoring writes
+        // tier-scoped cycles, so the global "latest completed" only covers
+        // whichever tier ran last — we must scope the lookup by tier.
+        // Fall back to any legacy tier-less cycle if no tier-scoped cycle
+        // exists yet.
+        let cycle = await db.scoringCycle.findFirst({
+          where: { status: 'COMPLETED', tier },
           orderBy: { completedAt: 'desc' },
           include: {
             scores: {
@@ -300,6 +315,19 @@ export async function indexInfoRoutes(app: FastifyInstance) {
             },
           },
         })
+        if (!cycle) {
+          cycle = await db.scoringCycle.findFirst({
+            where: { status: 'COMPLETED', tier: null },
+            orderBy: { completedAt: 'desc' },
+            include: {
+              scores: {
+                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+                orderBy: { rank: 'asc' },
+                select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+              },
+            },
+          })
+        }
         if (!cycle || cycle.scores.length === 0) {
           return { success: true, data: { tier, tokens: [], hours } }
         }
