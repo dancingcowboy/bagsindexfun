@@ -134,7 +134,10 @@ export default function DashboardPage() {
         transaction: new Uint8Array(serialized),
         chain: 'solana:mainnet',
       })
-      const txSignature = bs58.encode(sigBytes)
+      const txSignature =
+        typeof sigBytes === 'string'
+          ? sigBytes
+          : bs58.encode(sigBytes instanceof Uint8Array ? sigBytes : new Uint8Array(sigBytes as any))
 
       setDepositStatus('Confirming on-chain…')
       // HTTP-only confirmation: our RPC proxy has no websocket, so poll
