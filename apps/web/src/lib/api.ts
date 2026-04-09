@@ -94,10 +94,13 @@ class ApiClient {
   }
 
   // Deposits
-  createDeposit(amountSol: number) {
+  createDeposit(
+    amountSol: number,
+    riskTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+  ) {
     return this.fetch<{ data: any }>('/deposits', {
       method: 'POST',
-      body: JSON.stringify({ amountSol }),
+      body: JSON.stringify({ amountSol, riskTier }),
     })
   }
 

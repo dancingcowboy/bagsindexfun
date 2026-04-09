@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [showDeposit, setShowDeposit] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
+  const [depositTier, setDepositTier] = useState<'CONSERVATIVE' | 'BALANCED' | 'DEGEN'>('BALANCED')
   const [withdrawing, setWithdrawing] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
   const [portfolioLive, setPortfolioLive] = useState(false)
@@ -76,7 +77,7 @@ export default function DashboardPage() {
     const amount = parseFloat(depositAmount)
     if (!amount || amount <= 0) return
     try {
-      const res = await api.createDeposit(amount)
+      const res = await api.createDeposit(amount, depositTier)
       // TODO: Privy wallet sign SOL transfer to sub-wallet address
       // Then confirm: api.confirmDeposit(res.data.id, txSignature)
       alert(`Deposit created. Send ${amount} SOL to: ${res.data.subWalletAddress}`)
@@ -284,6 +285,31 @@ export default function DashboardPage() {
               </h2>
               <div className="mb-4">
                 <label className="block text-sm text-[var(--color-text-muted)] mb-2">
+                  Index
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((tier) => {
+                    const active = depositTier === tier
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        onClick={() => setDepositTier(tier)}
+                        className="rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
+                        style={
+                          active
+                            ? { background: '#00D62B', color: '#000', borderColor: '#00D62B' }
+                            : { borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }
+                        }
+                      >
+                        {tier}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm text-[var(--color-text-muted)] mb-2">
                   Amount (SOL)
                 </label>
                 <input
@@ -296,20 +322,6 @@ export default function DashboardPage() {
                   className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-3 font-[family-name:var(--font-mono)] text-lg outline-none focus:border-[var(--color-accent)]"
                 />
               </div>
-              {depositAmount && parseFloat(depositAmount) > 0 && (
-                <div className="mb-4 rounded-lg bg-[var(--color-bg-secondary)] p-4 text-sm">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[var(--color-text-muted)]">Fee (3%)</span>
-                    <span>{(parseFloat(depositAmount) * 0.03).toFixed(4)} SOL</span>
-                  </div>
-                  <div className="flex justify-between font-medium">
-                    <span className="text-[var(--color-text-muted)]">Net deposit</span>
-                    <span className="text-[var(--color-green)]">
-                      {(parseFloat(depositAmount) * 0.97).toFixed(4)} SOL
-                    </span>
-                  </div>
-                </div>
-              )}
               <div className="flex gap-3">
                 <button onClick={handleDeposit} className="btn-primary flex-1">
                   Deposit
