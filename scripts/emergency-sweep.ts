@@ -159,7 +159,10 @@ async function main() {
     process.exit(1)
   }
 
-  const where: any = {}
+  // Skip placeholder rows whose address starts with `pending-` — those
+  // represent users whose Privy provisioning failed mid-signup and have
+  // no real on-chain account to sweep.
+  const where: any = { address: { not: { startsWith: 'pending-' } } }
   if (walletId) where.id = walletId
   if (userId) where.userId = userId
 

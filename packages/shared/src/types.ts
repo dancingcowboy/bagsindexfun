@@ -144,14 +144,6 @@ export interface RebalanceDelta {
   amountSol: number
 }
 
-// ─── Burn ───────────────────────────────────────────────────────────────────
-
-export interface BurnStats {
-  totalTokensBurned: string
-  totalSolSpent: string
-  burnCount: number
-}
-
 // ─── API Responses ──────────────────────────────────────────────────────────
 
 export interface ApiResponse<T> {

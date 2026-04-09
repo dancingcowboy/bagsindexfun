@@ -1,23 +1,14 @@
-// ─── Fees ────────────────────────────────────────────────────────────────────
-
-/** Deposit fee in basis points (3%) */
-export const DEPOSIT_FEE_BPS = 300
-
-/** Withdrawal fee in basis points (2%) */
-export const WITHDRAWAL_FEE_BPS = 200
+// ─── Platform Token Exposure ─────────────────────────────────────────────────
 
 /**
- * Flat fee (in basis points) charged when a user switches between tier
- * indexes without round-tripping through their connected wallet. Cheaper
- * than withdraw+deposit (which would cost 5% + 2× burn) because:
- *   - single fee event instead of two
- *   - no on-chain SOL transfer between user wallet and sub-wallets
- *   - smart-delta: overlap tokens aren't sold then rebought
+ * Every index vault (user + protocol system vault) holds a fixed 8% slice in
+ * $BAGSX, the platform token. Replaces the old 3%/2% deposit/withdrawal fees
+ * and the buyback-and-burn flywheel — now every participant is directly
+ * exposed to the platform's upside via native token holdings. Sold back to
+ * SOL on withdrawal like any other holding.
  */
-export const SWITCH_FEE_BPS = 100
-
-/** Percentage of fee that goes to buy & burn — 100%, no staking pool */
-export const BURN_ALLOCATION_PCT = 100
+export const BAGSX_MINT = 'DTp6oMA51WydSAcqY8cgYCFTtQXcQHNq5geCSgrwBAGS'
+export const BAGSX_WEIGHT_PCT = 8
 
 // ─── Risk Tiers ─────────────────────────────────────────────────────────────
 
@@ -100,8 +91,8 @@ export const TIER_SCORING_CONFIG = {
     minHolderCount: 200,
     minAgeDays: 5,
     maxVolatility7d: 0.6,
-    /** SOL anchor allocation — Conservative holds 20% in SOL to dampen meme volatility. */
-    solAnchorPct: 20,
+    /** SOL anchor allocation — Conservative holds 12% SOL + 8% BAGSX (exposure). */
+    solAnchorPct: 12,
   },
   BALANCED: {
     weights: { volume: 0.50, holderGrowth: 0.30, liquidity: 0.20 },
@@ -165,7 +156,6 @@ export const QUEUE_SCORING = 'scoring'
 export const QUEUE_REBALANCE = 'rebalance'
 export const QUEUE_DEPOSIT = 'deposit-allocation'
 export const QUEUE_WITHDRAWAL = 'withdrawal-liquidation'
-export const QUEUE_BURN = 'burn'
 export const QUEUE_ANALYSIS = 'analysis'
 export const QUEUE_FEE_CLAIM = 'fee-claim'
 export const QUEUE_PRICE_SNAPSHOT = 'price-snapshot'
