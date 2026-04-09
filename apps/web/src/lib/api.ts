@@ -49,8 +49,8 @@ class ApiClient {
   }
 
   // Portfolio
-  getPortfolio() {
-    return this.fetch<{ data: any }>('/portfolio')
+  getPortfolio(live = false) {
+    return this.fetch<{ data: any }>(`/portfolio${live ? '?live=1' : ''}`)
   }
 
   getTransactions() {

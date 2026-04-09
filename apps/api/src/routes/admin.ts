@@ -267,8 +267,9 @@ export async function adminRoutes(app: FastifyInstance) {
    * Admin-only; returns the system:protocol-vault user's sub-wallets,
    * token holdings, and fee-claim history.
    */
-  app.get('/vault', async (_req, reply) => {
+  app.get<{ Querystring: { live?: string } }>('/vault', async (req, reply) => {
     try {
+      const wantsLive = req.query.live === '1' || req.query.live === 'true'
       const user = await db.user.findUnique({
         where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
         include: {
@@ -295,15 +296,19 @@ export async function adminRoutes(app: FastifyInstance) {
           })
         : []
 
-      // Live read from chain + price APIs — the source of truth. DB
-      // holdings are kept in sync for cost basis / PnL snapshots, but for
-      // display we always read through.
+      // Live read-through is opt-in via ?live=1. DB holdings are kept
+      // fresh by post-swap reconcile in every worker, so the default
+      // page render just uses them — no Helius DAS hit per visit.
+      // Admin dashboard's "Refresh Holdings" button sets ?live=1 to force
+      // a fresh read when needed.
       let live: Awaited<ReturnType<typeof import('@bags-index/solana').getLiveHoldings>> | null = null
-      try {
-        const { getLiveHoldings } = await import('@bags-index/solana')
-        live = await getLiveHoldings(user.walletAddress)
-      } catch (err) {
-        app.log.warn({ err }, '[admin/vault] live holdings fetch failed')
+      if (wantsLive) {
+        try {
+          const { getLiveHoldings } = await import('@bags-index/solana')
+          live = await getLiveHoldings(user.walletAddress)
+        } catch (err) {
+          app.log.warn({ err }, '[admin/vault] live holdings fetch failed')
+        }
       }
 
       // Resolve symbol/name per mint from the most recent TokenScore row.
@@ -628,10 +633,27 @@ export async function adminRoutes(app: FastifyInstance) {
   /**
    * POST /admin/trigger-scoring
    */
-  app.post('/trigger-scoring', async (_req, reply) => {
+  app.post<{ Querystring: { tier?: string } }>('/trigger-scoring', async (req, reply) => {
     try {
-      await scoringQueue.add('manual-scoring', {}, { priority: 1 })
-      return { success: true, data: { message: 'Scoring job queued' } }
+      // With per-tier scheduling, a manual trigger fans out into 3 jobs
+      // (one per tier). Pass ?tier=DEGEN|BALANCED|CONSERVATIVE to run a
+      // single tier. No body → all three.
+      const tierArg = (req.query.tier ?? '').toUpperCase()
+      const targets: RiskTier[] =
+        tierArg && RISK_TIERS.includes(tierArg as RiskTier)
+          ? [tierArg as RiskTier]
+          : [...RISK_TIERS]
+      for (const tier of targets) {
+        await scoringQueue.add(
+          `manual-scoring-${tier}`,
+          { tier },
+          { priority: 1 },
+        )
+      }
+      return {
+        success: true,
+        data: { message: `Scoring queued`, tiers: targets },
+      }
     } catch (err) {
       app.log.error(err, 'Failed to trigger scoring')
       return reply.status(500).send({ error: 'Internal server error' })

@@ -18,9 +18,10 @@ export async function portfolioRoutes(app: FastifyInstance) {
    * Aggregate portfolio across all the user's tier wallets.
    * Returns holdings grouped by riskTier.
    */
-  app.get('/', async (req, reply) => {
+  app.get<{ Querystring: { live?: string } }>('/', async (req, reply) => {
     try {
       const userId = req.authUser!.userId
+      const wantsLive = req.query.live === '1' || req.query.live === 'true'
 
       const wallets = await db.subWallet.findMany({
         where: { userId },
@@ -31,24 +32,27 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return { success: true, data: { totalValueSol: '0', tiers: [] } }
       }
 
-      // Live read from chain + price APIs for each sub-wallet. DB rows
-      // are still authoritative for cost basis / PnL / allocation intent,
-      // but the displayed amount + value reflects real on-chain state.
-      const { getLiveHoldings } = await import('@bags-index/solana')
+      // Live read from chain + price APIs is now opt-in via ?live=1. The DB
+      // holdings table is kept fresh by post-swap reconcile in every worker,
+      // so the default path is instant and uses zero external API calls. A
+      // "Refresh Holdings" button on the dashboard re-requests with ?live=1.
       const liveByAddress = new Map<
         string,
-        Awaited<ReturnType<typeof getLiveHoldings>> | null
+        Awaited<ReturnType<typeof import('@bags-index/solana').getLiveHoldings>> | null
       >()
-      await Promise.all(
-        wallets.map(async (w) => {
-          try {
-            liveByAddress.set(w.address, await getLiveHoldings(w.address))
-          } catch (err) {
-            app.log.warn({ err, wallet: w.address }, '[portfolio] live fetch failed')
-            liveByAddress.set(w.address, null)
-          }
-        }),
-      )
+      if (wantsLive) {
+        const { getLiveHoldings } = await import('@bags-index/solana')
+        await Promise.all(
+          wallets.map(async (w) => {
+            try {
+              liveByAddress.set(w.address, await getLiveHoldings(w.address))
+            } catch (err) {
+              app.log.warn({ err, wallet: w.address }, '[portfolio] live fetch failed')
+              liveByAddress.set(w.address, null)
+            }
+          }),
+        )
+      }
 
       // Pull token symbol/name from recent TokenScore rows so the UI has
       // labels for every mint we display (live or DB).

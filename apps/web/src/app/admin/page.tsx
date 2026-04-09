@@ -176,9 +176,13 @@ export default function AdminPage() {
 
   const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault'>('overview')
 
+  const [vaultLive, setVaultLive] = useState(false)
   const vault = useQuery({
-    queryKey: ['admin-vault'],
-    queryFn: () => fetchJson<{ data: VaultData | null }>('/admin/vault'),
+    queryKey: ['admin-vault', vaultLive],
+    queryFn: () =>
+      fetchJson<{ data: VaultData | null }>(
+        `/admin/vault${vaultLive ? '?live=1' : ''}`,
+      ),
     enabled: tab === 'vault',
     refetchInterval: tab === 'vault' ? 20_000 : false,
   })
@@ -675,6 +679,18 @@ export default function AdminPage() {
               </Panel>
             ) : (
               <>
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      setVaultLive(true)
+                      setTimeout(() => vault.refetch(), 0)
+                    }}
+                    disabled={vault.isFetching}
+                    className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+                  >
+                    {vault.isFetching ? 'Refreshing…' : vaultLive ? 'Refresh Holdings (live)' : 'Refresh Holdings'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                   <Stat icon={<Coins className="h-4 w-4" />} label="Vault Value" value={`${vault.data.data.totals.totalValueSol} SOL`} sub={vault.data.data.totals.tokenValueSol != null ? `tokens ${vault.data.data.totals.tokenValueSol} + native ${vault.data.data.totals.nativeSol}` : 'current holdings est.'} />
                   <Stat icon={<Activity className="h-4 w-4" />} label="Claimed (all time)" value={`${vault.data.data.totals.totalClaimedSol} SOL`} sub={`${vault.data.data.totals.claimCount} claims`} />

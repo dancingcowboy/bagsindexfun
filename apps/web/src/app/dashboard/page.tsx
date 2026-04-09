@@ -29,14 +29,15 @@ export default function DashboardPage() {
   const [depositAmount, setDepositAmount] = useState('')
   const [withdrawing, setWithdrawing] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
+  const [portfolioLive, setPortfolioLive] = useState(false)
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
   }, [ready, authenticated, router])
 
-  const { data: portfolio, refetch: refetchPortfolio } = useQuery({
-    queryKey: ['portfolio'],
-    queryFn: () => api.getPortfolio(),
+  const { data: portfolio, refetch: refetchPortfolio, isFetching: portfolioFetching } = useQuery({
+    queryKey: ['portfolio', portfolioLive],
+    queryFn: () => api.getPortfolio(portfolioLive),
     enabled: authenticated,
     refetchInterval: 30_000,
   })
@@ -354,9 +355,22 @@ export default function DashboardPage() {
           transition={{ delay: 0.1 }}
           className="mb-8"
         >
-          <h2 className="font-[family-name:var(--font-display)] text-xl font-bold mb-4">
-            Holdings
-          </h2>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
+              Holdings
+            </h2>
+            <button
+              onClick={() => {
+                setPortfolioLive(true)
+                setTimeout(() => refetchPortfolio(), 0)
+              }}
+              disabled={portfolioFetching}
+              className="flex items-center gap-2 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs font-bold uppercase hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3 w-3 ${portfolioFetching ? 'animate-spin' : ''}`} />
+              {portfolioFetching ? 'Refreshing…' : portfolioLive ? 'Refresh (live)' : 'Refresh Holdings'}
+            </button>
+          </div>
           <div className="card overflow-hidden p-0">
             <table className="w-full">
               <thead>
