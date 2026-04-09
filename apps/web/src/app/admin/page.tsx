@@ -631,13 +631,14 @@ export default function AdminPage() {
                   <Stat icon={<Shield className="h-4 w-4" />} label="Sub-wallets" value={vault.data.data.subWallets.length.toString()} sub="per risk tier" />
                 </div>
 
-                <PnlHistoryChart
-                  endpoint="/admin/vault-pnl-history"
-                  title="Protocol Vault PnL"
-                  subtitle="Hourly snapshots of the system vault — value in SOL per tier"
-                />
-
-                <VaultTwrChart />
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <PnlHistoryChart
+                    endpoint="/admin/vault-pnl-history"
+                    title="Protocol Vault PnL"
+                    subtitle="Hourly snapshots of the system vault — value in SOL per tier"
+                  />
+                  <VaultTwrChart />
+                </div>
 
                 <TokenPriceChart
                   tierSelectable
