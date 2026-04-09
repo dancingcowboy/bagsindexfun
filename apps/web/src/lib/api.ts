@@ -115,6 +115,27 @@ class ApiClient {
     return this.fetch<{ data: any[] }>('/deposits')
   }
 
+  getDepositProgress(id: string) {
+    return this.fetch<{
+      data: {
+        depositStatus: string
+        done: boolean
+        counts: { pending: number; confirmed: number; failed: number; total: number }
+        swaps: Array<{
+          id: string
+          outputMint: string
+          tokenSymbol: string | null
+          inputSol: string
+          outputAmount: string | null
+          status: string
+          errorMessage: string | null
+          executedAt: string
+          confirmedAt: string | null
+        }>
+      }
+    }>(`/deposits/${id}/progress`)
+  }
+
   // Withdrawals
   createWithdrawal() {
     return this.fetch<{ data: any }>('/withdrawals', {

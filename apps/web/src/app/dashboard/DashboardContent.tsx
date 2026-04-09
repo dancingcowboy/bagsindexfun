@@ -25,6 +25,7 @@ import { MoneyWeightedPnlChart } from '@/components/MoneyWeightedPnlChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { Notice, type NoticeState } from '@/components/Notice'
+import { AllocationProgressModal } from '@/components/AllocationProgressModal'
 import { API_BASE } from '@/lib/api'
 
 const SOLANA_RPC_URL =
@@ -46,6 +47,11 @@ export default function DashboardPage() {
   // instead of stale valueSolEst from DB.
   const [portfolioLive, setPortfolioLive] = useState(true)
   const [notice, setNotice] = useState<NoticeState | null>(null)
+  const [allocation, setAllocation] = useState<{
+    depositId: string
+    tier: string
+    amountSol: number
+  } | null>(null)
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
@@ -170,12 +176,9 @@ export default function DashboardPage() {
       setShowDeposit(false)
       setDepositAmount('')
       setDepositStatus(null)
-      setNotice({
-        kind: 'success',
-        title: 'Deposit confirmed',
-        message: `${amount} SOL sent to your ${depositTier} vault. Allocation will begin shortly.`,
-      })
-      refetchPortfolio()
+      // Open the live allocation progress modal; it polls the worker and
+      // refetches the portfolio once every swap has settled.
+      setAllocation({ depositId, tier: depositTier, amountSol: amount })
     } catch (err: any) {
       setDepositStatus(null)
       setNotice({
@@ -622,6 +625,21 @@ export default function DashboardPage() {
         </motion.div>
       </div>
       <Notice notice={notice} onClose={() => setNotice(null)} />
+      <AllocationProgressModal
+        depositId={allocation?.depositId ?? null}
+        tier={allocation?.tier ?? ''}
+        amountSol={allocation?.amountSol ?? 0}
+        onClose={() => setAllocation(null)}
+        onDone={() => {
+          setAllocation(null)
+          refetchPortfolio()
+          setNotice({
+            kind: 'success',
+            title: 'Allocation complete',
+            message: 'Your deposit has been swapped into the vault basket.',
+          })
+        }}
+      />
     </div>
   )
 }

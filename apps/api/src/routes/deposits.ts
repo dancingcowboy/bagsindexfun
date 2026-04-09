@@ -124,6 +124,80 @@ export async function depositRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /deposits/:id/progress
+   * Live allocation progress for a single deposit. Returns the deposit
+   * status plus every swap_execution against the tier sub-wallet since
+   * the deposit was confirmed, so the dashboard can render a live log
+   * while the worker is buying tokens and auto-refresh when done.
+   */
+  app.get('/:id/progress', async (req, reply) => {
+    try {
+      const { id } = req.params as { id: string }
+      const userId = req.authUser!.userId
+
+      const deposit = await db.deposit.findFirst({
+        where: { id, userId },
+      })
+      if (!deposit) return reply.status(404).send({ error: 'Deposit not found' })
+
+      const subWallet = await db.subWallet.findUnique({
+        where: { userId_riskTier: { userId, riskTier: deposit.riskTier } },
+        select: { id: true },
+      })
+
+      const since = deposit.confirmedAt ?? deposit.createdAt
+      const swaps = subWallet
+        ? await db.swapExecution.findMany({
+            where: { subWalletId: subWallet.id, executedAt: { gte: since } },
+            orderBy: { executedAt: 'asc' },
+            take: 50,
+          })
+        : []
+
+      const mints = [...new Set(swaps.map((s) => s.outputMint))]
+      const scores = mints.length
+        ? await db.tokenScore.findMany({
+            where: { tokenMint: { in: mints } },
+            orderBy: { scoredAt: 'desc' },
+            select: { tokenMint: true, tokenSymbol: true },
+          })
+        : []
+      const symbolByMint = new Map<string, string | null>()
+      for (const s of scores) {
+        if (!symbolByMint.has(s.tokenMint)) symbolByMint.set(s.tokenMint, s.tokenSymbol)
+      }
+
+      const pending = swaps.filter((s) => s.status === 'PENDING').length
+      const confirmed = swaps.filter((s) => s.status === 'CONFIRMED').length
+      const failed = swaps.filter((s) => s.status === 'FAILED').length
+      const done = deposit.status !== 'PENDING' && swaps.length > 0 && pending === 0
+
+      return {
+        success: true,
+        data: {
+          depositStatus: deposit.status,
+          done,
+          counts: { pending, confirmed, failed, total: swaps.length },
+          swaps: swaps.map((s) => ({
+            id: s.id,
+            outputMint: s.outputMint,
+            tokenSymbol: symbolByMint.get(s.outputMint) ?? null,
+            inputSol: (Number(s.inputAmount) / 1e9).toFixed(6),
+            outputAmount: s.outputAmount?.toString() ?? null,
+            status: s.status,
+            errorMessage: s.errorMessage,
+            executedAt: s.executedAt,
+            confirmedAt: s.confirmedAt,
+          })),
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to get deposit progress')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /deposits
    * List user's deposits.
    */
