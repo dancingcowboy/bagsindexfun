@@ -25,9 +25,10 @@ import { MoneyWeightedPnlChart } from '@/components/MoneyWeightedPnlChart'
 import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { Notice, type NoticeState } from '@/components/Notice'
+import { API_BASE } from '@/lib/api'
 
 const SOLANA_RPC_URL =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL || `${API_BASE}/solana/rpc`
 
 export default function DashboardPage() {
   const { authenticated, ready, logout, user, connectWallet } = usePrivy()
@@ -136,10 +137,21 @@ export default function DashboardPage() {
       const txSignature = bs58.encode(sigBytes)
 
       setDepositStatus('Confirming on-chain…')
-      await connection.confirmTransaction(
-        { signature: txSignature, blockhash, lastValidBlockHeight },
-        'confirmed',
-      )
+      // HTTP-only confirmation: our RPC proxy has no websocket, so poll
+      // getSignatureStatuses until the tx is confirmed or we time out.
+      const deadline = Date.now() + 60_000
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value } = await connection.getSignatureStatuses([txSignature])
+        const st = value[0]
+        if (st?.err) throw new Error('Transaction failed on-chain')
+        if (
+          st?.confirmationStatus === 'confirmed' ||
+          st?.confirmationStatus === 'finalized'
+        ) break
+        if (Date.now() > deadline) throw new Error('Timed out waiting for confirmation')
+        await new Promise((r) => setTimeout(r, 1500))
+      }
 
       setDepositStatus('Notifying backend…')
       await api.confirmDeposit(depositId, txSignature)

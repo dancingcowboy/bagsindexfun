@@ -12,6 +12,7 @@ import { portfolioRoutes } from './routes/portfolio.js'
 import { indexInfoRoutes } from './routes/index-info.js'
 import { projectRoutes } from './routes/projects.js'
 import { analysisRoutes } from './routes/analysis.js'
+import { solanaRpcRoutes } from './routes/solana-rpc.js'
 import { adminRoutes } from './routes/admin.js'
 import { db } from '@bags-index/db'
 import { redis } from './queue/redis.js'
@@ -129,6 +130,7 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(indexInfoRoutes, { prefix: '/index' })
 await app.register(projectRoutes, { prefix: '/projects' })
 await app.register(analysisRoutes, { prefix: '/analysis' })
+await app.register(solanaRpcRoutes, { prefix: '/solana/rpc' })
 
 // Admin routes
 await app.register(adminRoutes, { prefix: '/admin' })
