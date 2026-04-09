@@ -1,9 +1,20 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { RISK_TIERS } from '@bags-index/shared'
+import {
+  RISK_TIERS,
+  TIER_SCORING_CONFIG,
+  BAGSX_MINT,
+  BAGSX_WEIGHT_PCT,
+} from '@bags-index/shared'
 
+/**
+ * Rescale scored allocations down by the fixed BAGSX + SOL anchor slice
+ * and append pseudo-entries for BAGSX (every tier) and SOL (tiers with a
+ * non-zero anchor). Keeps the allocation list honest: scored tokens shown
+ * at their *vault* weight (not their sleeve weight) and the two fixed
+ * sleeves visible with their real percentages.
+ */
 function formatAllocations(allocations: any[]) {
-  // Group by tier
   const byTier: Record<string, any[]> = {}
   for (const a of allocations) {
     const tier = a.tier ?? 'BALANCED'
@@ -17,6 +28,36 @@ function formatAllocations(allocations: any[]) {
       confidence: a.confidence,
       signals: a.signals,
     })
+  }
+
+  for (const tier of Object.keys(byTier)) {
+    const cfg = TIER_SCORING_CONFIG[tier as keyof typeof TIER_SCORING_CONFIG]
+    const anchorPct = cfg?.solAnchorPct ?? 0
+    const scoredScale = (100 - BAGSX_WEIGHT_PCT - anchorPct) / 100
+    byTier[tier] = byTier[tier].map((a) => ({
+      ...a,
+      weightPct: Number((a.weightPct * scoredScale).toFixed(2)),
+    }))
+    byTier[tier].push({
+      tokenMint: BAGSX_MINT,
+      tokenSymbol: 'BAGSX',
+      tokenName: 'Bags Index',
+      weightPct: BAGSX_WEIGHT_PCT,
+      reasoning: 'Fixed 8% platform-token slice held by every vault',
+      confidence: 'high',
+      signals: ['Platform Token', 'Fixed Allocation'],
+    })
+    if (anchorPct > 0) {
+      byTier[tier].push({
+        tokenMint: 'SOL',
+        tokenSymbol: 'SOL',
+        tokenName: 'Solana',
+        weightPct: anchorPct,
+        reasoning: `${anchorPct}% SOL anchor held natively in the vault`,
+        confidence: 'high',
+        signals: ['Anchor', 'Native'],
+      })
+    }
   }
   return byTier
 }

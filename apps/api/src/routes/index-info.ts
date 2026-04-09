@@ -1,5 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
+import {
+  BAGSX_MINT,
+  BAGSX_WEIGHT_PCT,
+  TIER_SCORING_CONFIG,
+} from '@bags-index/shared'
 
 /**
  * Public routes — no auth required. Exposes index composition.
@@ -74,26 +79,77 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         0
       )
 
+      const cycleTier = (latestCycle.tier ?? 'BALANCED') as
+        | 'CONSERVATIVE'
+        | 'BALANCED'
+        | 'DEGEN'
+      const anchorPct = TIER_SCORING_CONFIG[cycleTier]?.solAnchorPct ?? 0
+      const scoredScale = (100 - BAGSX_WEIGHT_PCT - anchorPct) / 100
+
+      const scoredTokens = latestCycle.scores.map((s) => ({
+        tokenMint: s.tokenMint,
+        tokenSymbol: s.tokenSymbol,
+        tokenName: s.tokenName,
+        volume24h: Number(s.volume24h),
+        holderCount: s.holderCount,
+        holderGrowthPct: Number(s.holderGrowthPct),
+        priceUsd: Number(s.priceUsd),
+        liquidityUsd: Number(s.liquidityUsd),
+        compositeScore: Number(s.compositeScore),
+        rank: s.rank,
+        weightPct:
+          totalScore > 0
+            ? ((Number(s.compositeScore) / totalScore) * 100 * scoredScale).toFixed(2)
+            : '0',
+      }))
+
+      // BAGSX pseudo-entry with the latest sampled SOL price.
+      const bagsxSnap = await db.tokenPriceSnapshot.findFirst({
+        where: { tokenMint: BAGSX_MINT },
+        orderBy: { createdAt: 'desc' },
+        select: { priceSol: true },
+      })
+      const bagsxEntry = {
+        tokenMint: BAGSX_MINT,
+        tokenSymbol: 'BAGSX',
+        tokenName: 'Bags Index',
+        volume24h: 0,
+        holderCount: 0,
+        holderGrowthPct: 0,
+        priceUsd: 0,
+        priceSol: bagsxSnap ? Number(bagsxSnap.priceSol) : 0,
+        liquidityUsd: 0,
+        compositeScore: 0,
+        rank: scoredTokens.length + 1,
+        weightPct: BAGSX_WEIGHT_PCT.toFixed(2),
+        isFixed: true as const,
+      }
+
+      const tokens: any[] = [...scoredTokens, bagsxEntry]
+      if (anchorPct > 0) {
+        tokens.push({
+          tokenMint: 'SOL',
+          tokenSymbol: 'SOL',
+          tokenName: 'Solana',
+          volume24h: 0,
+          holderCount: 0,
+          holderGrowthPct: 0,
+          priceUsd: 0,
+          liquidityUsd: 0,
+          compositeScore: 0,
+          rank: scoredTokens.length + 2,
+          weightPct: anchorPct.toFixed(2),
+          isFixed: true as const,
+        })
+      }
+
       return {
         success: true,
         data: {
           cycleId: latestCycle.id,
           scoredAt: latestCycle.completedAt,
-          tokens: latestCycle.scores.map((s) => ({
-            tokenMint: s.tokenMint,
-            tokenSymbol: s.tokenSymbol,
-            tokenName: s.tokenName,
-            volume24h: Number(s.volume24h),
-            holderCount: s.holderCount,
-            holderGrowthPct: Number(s.holderGrowthPct),
-            priceUsd: Number(s.priceUsd),
-            liquidityUsd: Number(s.liquidityUsd),
-            compositeScore: Number(s.compositeScore),
-            rank: s.rank,
-            weightPct: totalScore > 0
-              ? ((Number(s.compositeScore) / totalScore) * 100).toFixed(2)
-              : '0',
-          })),
+          tier: cycleTier,
+          tokens,
         },
       }
     } catch (err) {
@@ -204,9 +260,18 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         })
         const weights = new Map<string, number>()
         const totalScore = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
+        const anchorPct = TIER_SCORING_CONFIG[tier]?.solAnchorPct ?? 0
+        const scoredScale = (100 - BAGSX_WEIGHT_PCT - anchorPct) / 100
         for (const s of scores) {
-          weights.set(s.tokenMint, Number(s.compositeScore) / totalScore)
+          weights.set(
+            s.tokenMint,
+            (Number(s.compositeScore) / totalScore) * scoredScale,
+          )
         }
+        // Inject BAGSX as a fixed 8% basket component. SOL anchor is
+        // treated as cash — it doesn't move against SOL so it contributes
+        // 0 return; we simply don't add it to `weights`.
+        weights.set(BAGSX_MINT, BAGSX_WEIGHT_PCT / 100)
 
         // 2. Load price snapshots for the basket mints over the window.
         const allMints = new Set<string>(weights.keys())
@@ -374,8 +439,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           return { success: true, data: { tier, tokens: [], hours } }
         }
 
-        const mints = cycle.scores.map((s) => s.tokenMint)
-        const metaByMint = new Map(cycle.scores.map((s) => [s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName }]))
+        const mints = [...cycle.scores.map((s) => s.tokenMint), BAGSX_MINT]
+        const metaByMint = new Map<string, { symbol: string | null; name: string | null }>(
+          cycle.scores.map((s) => [s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName }]),
+        )
+        metaByMint.set(BAGSX_MINT, { symbol: 'BAGSX', name: 'Bags Index' })
 
         const samples = await db.tokenPriceSnapshot.findMany({
           where: { tokenMint: { in: mints }, createdAt: { gte: since } },
