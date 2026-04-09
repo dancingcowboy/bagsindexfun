@@ -34,15 +34,18 @@ export async function reconcileSubWalletHoldings(
   const dbByMint = new Map(holdings.map((h) => [h.tokenMint, h]))
 
   let updated = 0
-  let deleted = 0
+  const deleted = 0
   let inserted = 0
 
+  // Additive only: update amounts when on-chain reports a different value,
+  // insert missing mints. Never delete based on "not in on-chain" — the
+  // Helius /balances endpoint lags the chain by a few seconds after a swap,
+  // and wiping a freshly-bought holding because the indexer hasn't caught up
+  // yet has cost us real portfolios (see deposit cmns3akcr 2026-04-09).
+  // Sales to zero are handled explicitly in the swap/rebalance workers.
   for (const h of holdings) {
-    const onChainAmt = onChain.get(h.tokenMint) ?? 0n
-    if (onChainAmt === 0n) {
-      await db.holding.delete({ where: { id: h.id } })
-      deleted++
-    } else if (onChainAmt !== h.amount) {
+    const onChainAmt = onChain.get(h.tokenMint)
+    if (onChainAmt !== undefined && onChainAmt !== h.amount) {
       await db.holding.update({
         where: { id: h.id },
         data: { amount: onChainAmt },

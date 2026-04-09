@@ -81,7 +81,12 @@ export default function DashboardPage() {
   })
 
 
-  const holdings = portfolio?.data?.holdings ?? []
+  // Portfolio API returns tiers[], each with its own holdings[]. Flatten
+  // across tiers for the holdings table + "Holdings" count card.
+  const portfolioTiers = (portfolio?.data as any)?.tiers ?? []
+  const holdings = portfolioTiers.flatMap((t: any) =>
+    (t.holdings ?? []).map((h: any) => ({ ...h, riskTier: t.riskTier })),
+  )
   const totalValueSol = portfolio?.data?.totalValueSol ?? '0'
   const tokens = indexData?.data?.tokens ?? []
 
