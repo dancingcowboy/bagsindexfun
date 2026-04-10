@@ -73,8 +73,8 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
       },
     })
 
-    // X limits unverified accounts to 1 cashtag per post — use plain symbols.
-    const top3 = tierScores.slice(0, 3).map((s) => s.tokenSymbol).join(' · ')
+    // Max 3 cashtags per tweet — use them on the top 3 for cross-pollination.
+    const top3 = tierScores.slice(0, 3).map((s) => `$${s.tokenSymbol}`).join(' · ')
     const prevMints = new Set((prevCycle?.scores ?? []).map((s) => s.tokenMint))
     const currentMints = new Set(tierScores.map((s) => s.tokenMint))
     const added = tierScores.filter((s) => !prevMints.has(s.tokenMint)).slice(0, 2)
