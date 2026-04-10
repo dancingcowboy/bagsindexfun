@@ -5,11 +5,30 @@ import type { BagsTokenFeedItem, BagsTradeQuote, BagsSwapResponse } from '@bags-
 function getClient() {
   const apiKey = process.env.BAGS_API_KEY
   if (!apiKey) throw new Error('BAGS_API_KEY is required')
-  return axios.create({
+  const client = axios.create({
     baseURL: BAGS_API_BASE,
     headers: { 'x-api-key': apiKey },
     timeout: 15_000,
   })
+  // Retry with exponential backoff on 429 (rate limit) and 5xx. The Bags
+  // trade API throttles aggressively when a deposit allocation fans out
+  // into 11 quote+swap pairs back-to-back, and a swallowed 429 turned a
+  // user's CONSERVATIVE deposit into a no-op (deposit cmns5gfsj 2026-04-10).
+  client.interceptors.response.use(undefined, async (err) => {
+    const cfg: any = err.config
+    if (!cfg) throw err
+    const status = err.response?.status
+    const retriable = status === 429 || (status >= 500 && status < 600)
+    if (!retriable) throw err
+    cfg.__bagsRetry = (cfg.__bagsRetry ?? 0) + 1
+    if (cfg.__bagsRetry > 4) throw err
+    // 1s → 2s → 4s → 8s, with jitter so parallel callers don't sync up.
+    const base = 1000 * Math.pow(2, cfg.__bagsRetry - 1)
+    const wait = base + Math.floor(Math.random() * 400)
+    await new Promise((r) => setTimeout(r, wait))
+    return client.request(cfg)
+  })
+  return client
 }
 
 /**

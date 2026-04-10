@@ -140,8 +140,12 @@ async function processDeposit(job: Job<DepositJobData>) {
     }
   }
 
-  // Execute swaps sequentially (avoid nonce conflicts)
+  // Execute swaps sequentially (avoid nonce conflicts). A small inter-swap
+  // gap keeps us under the Bags trade API rate limit when a tier deposit
+  // fans out into 11 back-to-back quote+swap pairs.
+  let swapIdx = 0
   for (const score of latestCycle.scores) {
+    if (swapIdx++ > 0) await new Promise((r) => setTimeout(r, 600))
     const weightPct = Number(score.compositeScore) / totalScore
     const desiredSol = allocatableSol * weightPct
     const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
