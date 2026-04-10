@@ -116,7 +116,7 @@ export async function sendJitoProtected(signedTxBase64: string): Promise<string>
     )
   } catch (err: any) {
     const body = err?.response?.data
-    console.error(`[helius] Sender HTTP ${err?.response?.status}: ${JSON.stringify(body)?.slice(0, 500)}`)
+    console.error(`[helius] Sender HTTP ${err?.response?.status}: ${JSON.stringify(body)?.slice(0, 2000)}`)
     throw err
   }
   if (res.data.error) {
