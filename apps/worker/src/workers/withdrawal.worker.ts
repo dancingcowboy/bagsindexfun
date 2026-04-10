@@ -159,8 +159,9 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
       // have returned more than the quote predicted, and there may be
       // pre-existing SOL in the wallet from earlier partial withdrawals).
       const balanceLamports = await getNativeSolBalanceLamports(subWallet.address)
-      const TX_FEE = 10_000n
-      sendable = balanceLamports - TX_FEE
+      // Rent-exempt minimum (890,880) + tx fee (5,000)
+      const SWEEP_RESERVE = 900_000n
+      sendable = balanceLamports - SWEEP_RESERVE
     } else {
       const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
       sendable = totalRecoveredLamports - reserveLamports

@@ -5,7 +5,8 @@
 import { getNativeSolBalanceLamports, transferSolFromServerWallet } from '@bags-index/solana'
 
 const USER_WALLET = 'HF6jdrUj1iVdXBB15pZQBQXtebsFWimn2czN7cQgdmbS'
-const TX_FEE_LAMPORTS = 10_000n
+// Rent-exempt minimum (890,880) + tx fee (5,000) — sender must retain this
+const SWEEP_RESERVE_LAMPORTS = 900_000n
 
 const WALLETS_TO_SWEEP = [
   { address: 'CieZvPNxCc9a4UR5wzWcaLhsTQERkwj7roQhyFCpY36h', privyWalletId: 'xgcctgc6a6nz8r48w6vv8wv0', tier: 'DEGEN' },
@@ -18,7 +19,7 @@ async function main() {
 
   for (const w of WALLETS_TO_SWEEP) {
     const balanceLamports = await getNativeSolBalanceLamports(w.address)
-    const sendable = balanceLamports - TX_FEE_LAMPORTS
+    const sendable = balanceLamports - SWEEP_RESERVE_LAMPORTS
 
     if (sendable <= 0n) {
       console.log(`[sweep] ${w.tier} ${w.address.slice(0, 8)}… balance=${balanceLamports} lamports — too low`)
