@@ -10,16 +10,16 @@ import axios from 'axios'
  * Bags `/trade/quote` + `/trade/swap` pair.
  *
  * Endpoints:
- *   - GET  https://quote-api.jup.ag/v6/quote
- *   - POST https://quote-api.jup.ag/v6/swap
+ *   - GET  https://api.jup.ag/swap/v1/quote
+ *   - POST https://api.jup.ag/swap/v1/swap
  *
  * Response shape note: Jupiter's swap returns a base64-encoded
  * VersionedTransaction (not base58 like Bags), so callers must not
  * bs58-decode the result of this module's builders.
  */
 
-const JUP_QUOTE = 'https://quote-api.jup.ag/v6/quote'
-const JUP_SWAP = 'https://quote-api.jup.ag/v6/swap'
+const JUP_QUOTE = 'https://api.jup.ag/swap/v1/quote'
+const JUP_SWAP = 'https://api.jup.ag/swap/v1/swap'
 
 export interface JupiterQuote {
   inputMint: string
