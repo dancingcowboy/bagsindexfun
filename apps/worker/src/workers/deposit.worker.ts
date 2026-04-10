@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, submitAndConfirmDirect, capInputToLiquidity, signVersionedTxBytes } from '@bags-index/solana'
+import { buildBuyTransaction, submitAndConfirmDirect, capInputToLiquidity, signVersionedTxBytes, getNativeSolBalanceLamports } from '@bags-index/solana'
 import {
   QUEUE_DEPOSIT,
   TOP_N_TOKENS,
@@ -43,17 +43,53 @@ async function processDeposit(job: Job<DepositJobData>) {
     throw new Error(`No ${deposit.riskTier} sub-wallet for user ${userId}`)
   }
 
+  // Check which tokens were already bought in a previous run of this deposit.
+  // This makes re-enqueues idempotent — we only buy what's still missing.
+  const confirmedSwaps = await db.swapExecution.findMany({
+    where: {
+      subWalletId: subWallet.id,
+      status: 'CONFIRMED',
+      inputMint: SOL_MINT,
+      // Scoped to swaps created after the deposit, so unrelated older swaps
+      // (e.g. from a rebalance) don't false-positive.
+      executedAt: { gte: deposit.createdAt },
+    },
+    select: { outputMint: true },
+  })
+  const alreadyBoughtMints = new Set(confirmedSwaps.map((s) => s.outputMint))
+  if (alreadyBoughtMints.size > 0) {
+    logger.info(
+      `[deposit] Resuming — ${alreadyBoughtMints.size} token(s) already bought, skipping those`,
+    )
+  }
+
+  // Use actual on-chain balance instead of the deposit amount so partial
+  // re-runs allocate only what SOL remains in the wallet.
+  const actualLamports = await getNativeSolBalanceLamports(subWallet.address)
+  const actualSol = Number(actualLamports) / LAMPORTS_PER_SOL
+
   const netSol = Number(deposit.amountSol) - Number(deposit.feeSol)
   // Reserve gas, then split the remainder: tier SOL anchor stays native,
   // BAGSX_WEIGHT_PCT buys $BAGSX, the rest is allocated across scored tokens.
   const tierCfg = TIER_SCORING_CONFIG[deposit.riskTier as keyof typeof TIER_SCORING_CONFIG]
   const anchorPct = tierCfg?.solAnchorPct ?? 0
-  const postReserve = netSol - WALLET_RESERVE_SOL
-  const bagsxSol = postReserve > 0 ? postReserve * (BAGSX_WEIGHT_PCT / 100) : 0
-  const allocatableSol =
-    postReserve > 0 ? postReserve * (1 - anchorPct / 100 - BAGSX_WEIGHT_PCT / 100) : 0
+
+  // On a fresh run, use the deposit amount; on a re-run, use actual balance.
+  const baseSol = alreadyBoughtMints.size > 0 ? actualSol : netSol
+  const postReserve = baseSol - WALLET_RESERVE_SOL
+  const bagsxSol =
+    !alreadyBoughtMints.has(BAGSX_MINT) && postReserve > 0
+      ? postReserve * (BAGSX_WEIGHT_PCT / 100)
+      : 0
+  // For a re-run, the entire postReserve (minus BAGSX if needed) goes to
+  // remaining tokens — the original anchor/weight split already happened.
+  const allocatableSol = alreadyBoughtMints.size > 0
+    ? postReserve - bagsxSol
+    : postReserve > 0
+      ? postReserve * (1 - anchorPct / 100 - BAGSX_WEIGHT_PCT / 100)
+      : 0
   if (allocatableSol <= 0) {
-    logger.info(`[deposit] Net amount too small to allocate after reserve`)
+    logger.info(`[deposit] Net amount too small to allocate after reserve (${baseSol.toFixed(4)} SOL available)`)
     return
   }
 
@@ -80,8 +116,17 @@ async function processDeposit(job: Job<DepositJobData>) {
     return
   }
 
-  // Calculate weights
-  const totalScore = latestCycle.scores.reduce(
+  // Filter out tokens already bought in a previous run
+  const remainingScores = latestCycle.scores.filter(
+    (s) => !alreadyBoughtMints.has(s.tokenMint),
+  )
+  if (remainingScores.length === 0 && alreadyBoughtMints.has(BAGSX_MINT)) {
+    logger.info(`[deposit] All tokens already bought — nothing to do`)
+    return
+  }
+
+  // Calculate weights from remaining tokens only
+  const totalScore = remainingScores.reduce(
     (sum, s) => sum + Number(s.compositeScore),
     0
   )
@@ -105,7 +150,7 @@ async function processDeposit(job: Job<DepositJobData>) {
     })
     pendingSwaps.push({ id: row.id, mint: BAGSX_MINT, lamports: bagsxLamports })
   }
-  for (const score of latestCycle.scores) {
+  for (const score of remainingScores) {
     const weightPct = Number(score.compositeScore) / totalScore
     const desiredSol = allocatableSol * weightPct
     const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
@@ -188,7 +233,7 @@ async function processDeposit(job: Job<DepositJobData>) {
   // gap keeps us under the Bags trade API rate limit when a tier deposit
   // fans out into 11 back-to-back quote+swap pairs.
   let swapIdx = 0
-  for (const score of latestCycle.scores) {
+  for (const score of remainingScores) {
     if (swapIdx++ > 0) await new Promise((r) => setTimeout(r, 2000))
     const pending = pendingSwaps.find((p) => p.mint === score.tokenMint)
     if (!pending) continue
