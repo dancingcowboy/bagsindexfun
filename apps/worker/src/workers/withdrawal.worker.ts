@@ -144,8 +144,11 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
       }
 
       logger.info(`[withdrawal] Sold ${pct}% of ${holding.tokenMint.slice(0, 8)}… → ${quote.outAmount} lamports`)
-    } catch (err) {
-      logger.error(`[withdrawal] Failed to sell ${holding.tokenMint.slice(0, 8)}…: ${err}`)
+    } catch (err: any) {
+      const detail = err?.response?.status
+        ? `HTTP ${err.response.status} from ${err?.config?.url ?? 'unknown'}`
+        : err?.message ?? String(err)
+      logger.error(`[withdrawal] Failed to sell ${holding.tokenMint.slice(0, 8)}…: ${detail}`)
       failedTokens++
     }
 
