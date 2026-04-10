@@ -69,10 +69,11 @@ model Holding {
  * Bags /trade/quote against wSOL.
  */
 model TokenPriceSnapshot {
-  id        String   @id @default(cuid())
-  tokenMint String   @map("token_mint")
-  priceSol  Decimal  @map("price_sol") @db.Decimal(28, 12)
-  createdAt DateTime @default(now()) @map("created_at")
+  id           String   @id @default(cuid())
+  tokenMint    String   @map("token_mint")
+  priceSol     Decimal  @map("price_sol") @db.Decimal(28, 12)
+  marketCapUsd Decimal  @default(0) @map("market_cap_usd") @db.Decimal(20, 2)
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([tokenMint, createdAt])
   @@map("token_price_snapshots")

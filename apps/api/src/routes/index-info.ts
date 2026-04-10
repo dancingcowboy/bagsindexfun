@@ -113,11 +113,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
             : '0',
       }))
 
-      // BAGSX pseudo-entry with the latest sampled SOL price.
+      // BAGSX pseudo-entry with the latest sampled SOL price + market cap.
       const bagsxSnap = await db.tokenPriceSnapshot.findFirst({
         where: { tokenMint: BAGSX_MINT },
         orderBy: { createdAt: 'desc' },
-        select: { priceSol: true },
+        select: { priceSol: true, marketCapUsd: true },
       })
       const bagsxEntry = {
         tokenMint: BAGSX_MINT,
@@ -129,6 +129,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         priceUsd: 0,
         priceSol: bagsxSnap ? Number(bagsxSnap.priceSol) : 0,
         liquidityUsd: 0,
+        marketCapUsd: bagsxSnap ? Number(bagsxSnap.marketCapUsd) : 0,
         compositeScore: 0,
         rank: scoredTokens.length + 1,
         weightPct: BAGSX_WEIGHT_PCT.toFixed(2),
@@ -146,6 +147,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           holderGrowthPct: 0,
           priceUsd: 0,
           liquidityUsd: 0,
+          marketCapUsd: 0,
           compositeScore: 0,
           rank: scoredTokens.length + 2,
           weightPct: anchorPct.toFixed(2),

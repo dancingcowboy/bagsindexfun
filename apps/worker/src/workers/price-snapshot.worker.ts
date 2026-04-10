@@ -172,8 +172,9 @@ export async function processSnapshot(_job?: Job) {
         }
 
         if (priceSol === null) continue
+        const mc = dexPrices.get(mint)?.marketCapUsd ?? 0
         await db.tokenPriceSnapshot.create({
-          data: { tokenMint: mint, priceSol: priceSol.toFixed(12) },
+          data: { tokenMint: mint, priceSol: priceSol.toFixed(12), marketCapUsd: mc },
         })
         priceWrites++
       }
