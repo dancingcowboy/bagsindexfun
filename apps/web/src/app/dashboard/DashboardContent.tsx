@@ -699,6 +699,9 @@ export default function DashboardPage() {
                     Token
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    MC
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                     Score
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
@@ -720,6 +723,9 @@ export default function DashboardPage() {
                       <td className="px-6 py-3 font-medium text-sm">
                         {t.tokenSymbol}
                       </td>
+                      <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                        {t.marketCapUsd > 0 ? `$${(t.marketCapUsd >= 1_000_000 ? (t.marketCapUsd / 1_000_000).toFixed(1) + 'M' : t.marketCapUsd >= 1_000 ? (t.marketCapUsd / 1_000).toFixed(0) + 'K' : t.marketCapUsd.toFixed(0))}` : '—'}
+                      </td>
                       <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
                         {Number(t.compositeScore).toFixed(4)}
                       </td>
@@ -734,7 +740,7 @@ export default function DashboardPage() {
                 ) : (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-6 py-8 text-center text-[var(--color-text-muted)]"
                     >
                       Index initializing...

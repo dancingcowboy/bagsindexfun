@@ -195,30 +195,47 @@ export function AgentAnalysis() {
   const [showFullReasoning, setShowFullReasoning] = useState(false)
   const [expandedToken, setExpandedToken] = useState<string | null>(null)
 
-  // Fetch live market cap data from the API for the active tier
+  // Fetch live index data from the API for the active tier
   const liveQ = useQuery({
     queryKey: ['index-current', activeTier],
     queryFn: async () => {
       const res = await fetch(`${API_BASE}/index/current?tier=${activeTier}`)
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {
-        data: { tokens: { tokenMint: string; marketCapUsd: number }[] }
+        data: {
+          tokens: {
+            tokenMint: string
+            tokenSymbol: string
+            tokenName: string
+            marketCapUsd: number
+            compositeScore: number
+            weightPct: string
+            rank: number
+          }[]
+        }
       }
     },
     refetchInterval: 5 * 60_000,
   })
 
-  const mcByMint = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const t of liveQ.data?.data?.tokens ?? []) {
-      map.set(t.tokenMint, t.marketCapUsd)
-    }
-    return map
-  }, [liveQ.data])
+  // Build allocations from live API data; fall back to mock when loading
+  const allocations: (Allocation & { marketCapUsd?: number })[] = useMemo(() => {
+    const liveTokens = liveQ.data?.data?.tokens
+    if (!liveTokens?.length) return MOCK_TIERS[activeTier]
+    return liveTokens.map((t) => ({
+      tokenSymbol: t.tokenSymbol,
+      tokenName: t.tokenName,
+      tokenMint: t.tokenMint,
+      weightPct: Number(t.weightPct),
+      marketCapUsd: t.marketCapUsd,
+      reasoning: '',
+      confidence: 'medium',
+      signals: [],
+    }))
+  }, [liveQ.data, activeTier])
 
   const sentimentCfg = SENTIMENT_CONFIG[analysis.sentiment]
   const SentimentIcon = sentimentCfg.icon
-  const allocations = MOCK_TIERS[activeTier]
   const activeAllocations = allocations.filter((a) => a.weightPct > 0)
   const tierCfg = TIER_CONFIG[activeTier]
 
@@ -399,7 +416,7 @@ export function AgentAnalysis() {
                           {alloc.tokenName}
                         </span>
                         {(() => {
-                          const mc = mcByMint.get(alloc.tokenMint)
+                          const mc = (alloc as any).marketCapUsd
                           if (!mc || mc <= 0) return null
                           const label = mc >= 1_000_000
                             ? `$${(mc / 1_000_000).toFixed(1)}M`
