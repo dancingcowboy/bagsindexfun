@@ -1,8 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useQuery } from '@tanstack/react-query'
 import { useTier } from '@/lib/TierContext'
+import { API_BASE } from '@/lib/api'
 import {
   Brain,
   ChevronDown,
@@ -193,6 +195,27 @@ export function AgentAnalysis() {
   const [showFullReasoning, setShowFullReasoning] = useState(false)
   const [expandedToken, setExpandedToken] = useState<string | null>(null)
 
+  // Fetch live market cap data from the API for the active tier
+  const liveQ = useQuery({
+    queryKey: ['index-current', activeTier],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/index/current?tier=${activeTier}`)
+      if (!res.ok) throw new Error(`${res.status}`)
+      return (await res.json()) as {
+        data: { tokens: { tokenMint: string; marketCapUsd: number }[] }
+      }
+    },
+    refetchInterval: 5 * 60_000,
+  })
+
+  const mcByMint = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const t of liveQ.data?.data?.tokens ?? []) {
+      map.set(t.tokenMint, t.marketCapUsd)
+    }
+    return map
+  }, [liveQ.data])
+
   const sentimentCfg = SENTIMENT_CONFIG[analysis.sentiment]
   const SentimentIcon = sentimentCfg.icon
   const allocations = MOCK_TIERS[activeTier]
@@ -375,6 +398,20 @@ export function AgentAnalysis() {
                         <span className="text-xs text-[var(--color-text-muted)]">
                           {alloc.tokenName}
                         </span>
+                        {(() => {
+                          const mc = mcByMint.get(alloc.tokenMint)
+                          if (!mc || mc <= 0) return null
+                          const label = mc >= 1_000_000
+                            ? `$${(mc / 1_000_000).toFixed(1)}M`
+                            : mc >= 1_000
+                              ? `$${(mc / 1_000).toFixed(0)}K`
+                              : `$${mc.toFixed(0)}`
+                          return (
+                            <span className="text-[10px] font-[family-name:var(--font-mono)] text-[var(--color-text-muted)]">
+                              {label}
+                            </span>
+                          )
+                        })()}
                       </div>
                     </div>
 
