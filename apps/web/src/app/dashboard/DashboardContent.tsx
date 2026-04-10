@@ -77,6 +77,7 @@ import { Notice, type NoticeState } from '@/components/Notice'
 import { AllocationProgressModal } from '@/components/AllocationProgressModal'
 import { WithdrawalModal } from '@/components/WithdrawalModal'
 import { WithdrawalProgressModal } from '@/components/WithdrawalProgressModal'
+import { ChatWidget } from '@/components/ChatWidget'
 import { API_BASE } from '@/lib/api'
 
 const SOLANA_RPC_URL =
@@ -860,6 +861,7 @@ export default function DashboardPage() {
           })
         }}
       />
+      {authenticated && <ChatWidget />}
     </div>
   )
 }

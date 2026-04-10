@@ -18,6 +18,7 @@ model User {
   subWallets    SubWallet[]
   deposits      Deposit[]
   withdrawals   Withdrawal[]
+  chatMessages  ChatMessage[]
 
   @@map("users")
 }
@@ -332,6 +333,21 @@ model WalletWhitelist {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("wallet_whitelist")
+}
+
+// ─── Chat (Support) ─────────────────────────────────────────────────────────
+
+model ChatMessage {
+  id                String   @id @default(cuid())
+  userId            String   @map("user_id")
+  user              User     @relation(fields: [userId], references: [id])
+  direction         String   // "user" | "support"
+  message           String
+  telegramMessageId Int?     @map("telegram_message_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("chat_messages")
 }
 
 model TokenBlacklist {

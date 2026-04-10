@@ -14,6 +14,7 @@ import { projectRoutes } from './routes/projects.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { solanaRpcRoutes } from './routes/solana-rpc.js'
 import { adminRoutes } from './routes/admin.js'
+import { chatRoutes } from './routes/chat.js'
 import { db } from '@bags-index/db'
 import { redis } from './queue/redis.js'
 
@@ -134,6 +135,17 @@ await app.register(indexInfoRoutes, { prefix: '/index' })
 await app.register(projectRoutes, { prefix: '/projects' })
 await app.register(analysisRoutes, { prefix: '/analysis' })
 await app.register(solanaRpcRoutes, { prefix: '/solana/rpc' })
+
+// Chat — webhook is unauthenticated (Telegram calls it) so rate-limit it
+await app.register(async (scoped) => {
+  await scoped.register(rateLimit, {
+    max: 30,
+    timeWindow: '1 minute',
+    redis,
+    keyGenerator: (req) => req.ip,
+  })
+  await scoped.register(chatRoutes, { prefix: '/chat' })
+})
 
 // Admin routes
 await app.register(adminRoutes, { prefix: '/admin' })

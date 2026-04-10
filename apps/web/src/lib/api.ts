@@ -194,6 +194,18 @@ class ApiClient {
     }>('/index/schedule')
   }
 
+  // Chat
+  getChatMessages() {
+    return this.fetch<{ data: Array<{ id: string; direction: 'user' | 'support'; message: string; createdAt: string }> }>('/chat/messages')
+  }
+
+  sendChatMessage(message: string) {
+    return this.fetch<{ data: { id: string; createdAt: string } }>('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    })
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')
