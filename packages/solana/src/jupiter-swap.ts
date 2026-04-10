@@ -34,10 +34,11 @@ async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
     try {
       return await fn()
     } catch (err: any) {
-      const is429 = err?.response?.status === 429
-      if (!is429 || attempt === MAX_RETRIES) throw err
+      const status = err?.response?.status
+      const retriable = status === 429 || (status >= 500 && status < 600)
+      if (!retriable || attempt === MAX_RETRIES) throw err
       const delay = BASE_DELAY_MS * 2 ** attempt
-      console.warn(`[jupiter] 429 on ${label}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`)
+      console.warn(`[jupiter] ${status} on ${label}, retry ${attempt + 1}/${MAX_RETRIES} in ${delay}ms`)
       await new Promise((r) => setTimeout(r, delay))
     }
   }

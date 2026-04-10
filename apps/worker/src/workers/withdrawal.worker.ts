@@ -148,6 +148,10 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
       logger.error(`[withdrawal] Failed to sell ${holding.tokenMint.slice(0, 8)}…: ${err}`)
       failedTokens++
     }
+
+    // Pause between sells to avoid bursting through Jupiter rate limits
+    // when Bags is unavailable and all sells fall through to Jupiter.
+    await new Promise((r) => setTimeout(r, 2_000))
   }
 
   // Update withdrawal status
