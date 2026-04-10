@@ -127,9 +127,12 @@ export async function sendJitoProtected(signedTxBase64: string): Promise<string>
  */
 export async function getTokenSolLiquidity(tokenMint: string): Promise<number> {
   try {
+    const jupKey = process.env.JUPITER_API_KEY
+    const base = jupKey ? 'https://api.jup.ag/price/v2' : 'https://lite-api.jup.ag/price/v2'
+    const headers: Record<string, string> = jupKey ? { 'x-api-key': jupKey } : {}
     const res = await axios.get(
-      `https://lite-api.jup.ag/price/v2?ids=${tokenMint}&showExtraInfo=true`,
-      { timeout: 10_000 }
+      `${base}?ids=${tokenMint}&showExtraInfo=true`,
+      { headers, timeout: 10_000 }
     )
     const info = res.data?.data?.[tokenMint]
     const liq = info?.extraInfo?.depth?.buyPriceImpactRatio?.depth?.['1000'] ?? 0

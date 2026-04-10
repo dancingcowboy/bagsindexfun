@@ -8,9 +8,22 @@ export interface JupPriceInfo {
   blockId: number
 }
 
+function jupPriceUrl(): string {
+  // With a JUPITER_API_KEY use the keyed endpoint (higher rate limits);
+  // without, fall back to the keyless lite endpoint.
+  return process.env.JUPITER_API_KEY
+    ? 'https://api.jup.ag/price/v3'
+    : 'https://lite-api.jup.ag/price/v3'
+}
+
+function jupHeaders(): Record<string, string> {
+  const key = process.env.JUPITER_API_KEY
+  return key ? { 'x-api-key': key } : {}
+}
+
 /**
- * Batch-fetch prices + liquidity from Jupiter Lite Price API v3.
- * Free, no key, batch up to 100 mints per call.
+ * Batch-fetch prices + liquidity from Jupiter Price API v3.
+ * Batch up to 100 mints per call.
  * Response shape: `{ [mint]: { usdPrice, liquidity, decimals, createdAt, blockId } }`.
  * Mints with no Jupiter route are simply absent from the response.
  */
@@ -23,8 +36,8 @@ export async function getJupiterPrices(
     const slice = mints.slice(i, i + BATCH)
     try {
       const res = await axios.get(
-        `https://lite-api.jup.ag/price/v3?ids=${slice.join(',')}`,
-        { timeout: 15_000 }
+        `${jupPriceUrl()}?ids=${slice.join(',')}`,
+        { headers: jupHeaders(), timeout: 15_000 }
       )
       const data = res.data ?? {}
       for (const [mint, info] of Object.entries(data)) {
