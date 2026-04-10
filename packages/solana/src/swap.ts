@@ -132,18 +132,29 @@ export async function buildBuyTransaction(params: {
     console.warn(
       `[swap] Bags unavailable for buy ${params.tokenMint.slice(0, 8)}… (${e?.response?.status ?? e?.message ?? 'unknown'}); falling through to Jupiter`,
     )
-    const jq = await getJupiterQuote({
-      inputMint: SOL_MINT,
-      outputMint: params.tokenMint,
-      amount: params.solAmount.toString(),
-      slippageBps: slippage,
-    })
-    // Jupiter swap already includes jitoTipLamports in the built tx.
-    const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
-    return {
-      txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
-      quote: jq,
-      route: 'JUPITER',
+    let jq: Awaited<ReturnType<typeof getJupiterQuote>>
+    try {
+      jq = await getJupiterQuote({
+        inputMint: SOL_MINT,
+        outputMint: params.tokenMint,
+        amount: params.solAmount.toString(),
+        slippageBps: slippage,
+      })
+    } catch (quoteErr: any) {
+      console.error(`[swap] Jupiter quote failed for buy ${params.tokenMint.slice(0, 8)}…: ${quoteErr?.response?.status ?? quoteErr?.message}`)
+      throw quoteErr
+    }
+    try {
+      // Jupiter swap already includes jitoTipLamports in the built tx.
+      const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+      return {
+        txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+        quote: jq,
+        route: 'JUPITER',
+      }
+    } catch (swapErr: any) {
+      console.error(`[swap] Jupiter swap-build failed for buy ${params.tokenMint.slice(0, 8)}…: ${swapErr?.response?.status ?? swapErr?.message}`)
+      throw swapErr
     }
   }
 }
@@ -180,17 +191,28 @@ export async function buildSellTransaction(params: {
     console.warn(
       `[swap] Bags unavailable for sell ${params.tokenMint.slice(0, 8)}… (${e?.response?.status ?? e?.message ?? 'unknown'}); falling through to Jupiter`,
     )
-    const jq = await getJupiterQuote({
-      inputMint: params.tokenMint,
-      outputMint: SOL_MINT,
-      amount: params.tokenAmount.toString(),
-      slippageBps: slippage,
-    })
-    const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
-    return {
-      txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
-      quote: jq,
-      route: 'JUPITER',
+    let jq: Awaited<ReturnType<typeof getJupiterQuote>>
+    try {
+      jq = await getJupiterQuote({
+        inputMint: params.tokenMint,
+        outputMint: SOL_MINT,
+        amount: params.tokenAmount.toString(),
+        slippageBps: slippage,
+      })
+    } catch (quoteErr: any) {
+      console.error(`[swap] Jupiter quote failed for sell ${params.tokenMint.slice(0, 8)}…: ${quoteErr?.response?.status ?? quoteErr?.message}`)
+      throw quoteErr
+    }
+    try {
+      const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+      return {
+        txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+        quote: jq,
+        route: 'JUPITER',
+      }
+    } catch (swapErr: any) {
+      console.error(`[swap] Jupiter swap-build failed for sell ${params.tokenMint.slice(0, 8)}…: ${swapErr?.response?.status ?? swapErr?.message}`)
+      throw swapErr
     }
   }
 }
