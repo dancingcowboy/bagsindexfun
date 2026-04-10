@@ -57,9 +57,14 @@ async function processDeposit(job: Job<DepositJobData>) {
     return
   }
 
-  // Get current index weights for this tier
+  // Get current index weights for this tier. Per-tier scoring runs on
+  // staggered cron schedules and each run creates its own scoring_cycle,
+  // so the most-recent completed cycle usually has scores for only one
+  // tier. Pick the latest COMPLETED cycle that actually contains scores
+  // for the tier we're allocating into, not just the most-recent cycle
+  // overall.
   const latestCycle = await db.scoringCycle.findFirst({
-    where: { status: 'COMPLETED' },
+    where: { status: 'COMPLETED', tier: deposit.riskTier },
     orderBy: { completedAt: 'desc' },
     include: {
       scores: {
