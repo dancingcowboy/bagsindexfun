@@ -54,6 +54,7 @@ import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { Notice, type NoticeState } from '@/components/Notice'
 import { AllocationProgressModal } from '@/components/AllocationProgressModal'
+import { WithdrawalModal } from '@/components/WithdrawalModal'
 import { API_BASE } from '@/lib/api'
 
 const SOLANA_RPC_URL =
@@ -68,7 +69,7 @@ export default function DashboardPage() {
   const [depositTier, setDepositTier] = useState<'CONSERVATIVE' | 'BALANCED' | 'DEGEN'>('BALANCED')
   const [depositing, setDepositing] = useState(false)
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
-  const [withdrawing, setWithdrawing] = useState(false)
+  const [showWithdraw, setShowWithdraw] = useState(false)
   const [showSwitch, setShowSwitch] = useState(false)
   // Default to live mode so totalValueSol includes the sub-wallet's native
   // SOL balance (unspent after liquidity-cap clamps) and uses current prices
@@ -230,23 +231,7 @@ export default function DashboardPage() {
     }
   }
 
-  const handleWithdraw = async () => {
-    if (withdrawing) return
-    setWithdrawing(true)
-    try {
-      const res = await api.createWithdrawal()
-      setNotice({
-        kind: 'success',
-        title: 'Withdrawal initiated',
-        message: `Estimated ${res.data.netSol} SOL after fees. It will land in your wallet shortly.`,
-      })
-      refetchPortfolio()
-    } catch (err: any) {
-      setNotice({ kind: 'error', title: 'Withdrawal failed', message: err?.message ?? 'Unknown error' })
-    } finally {
-      setWithdrawing(false)
-    }
-  }
+  // Withdrawal is now handled by the WithdrawalModal component
 
   if (!ready || !authenticated) return null
 
@@ -295,11 +280,11 @@ export default function DashboardPage() {
                 <Shuffle className="h-4 w-4" /> Switch Index
               </button>
               <button
-                onClick={handleWithdraw}
-                disabled={withdrawing || holdings.length === 0}
+                onClick={() => setShowWithdraw(true)}
+                disabled={holdings.length === 0}
                 className="btn-outline flex items-center gap-2 text-sm disabled:opacity-40"
               >
-                <ArrowUpFromLine className="h-4 w-4" /> Withdraw All
+                <ArrowUpFromLine className="h-4 w-4" /> Withdraw
               </button>
             </div>
           </div>
@@ -757,6 +742,23 @@ export default function DashboardPage() {
           </div>
         </motion.div>
       </div>
+      <WithdrawalModal
+        open={showWithdraw}
+        onClose={() => setShowWithdraw(false)}
+        tiers={(pnlData?.data?.tiers ?? []).map((t: any) => ({
+          riskTier: t.riskTier,
+          currentValueSol: t.currentValueSol ?? '0',
+        }))}
+        onWithdrawn={() => {
+          setShowWithdraw(false)
+          refetchPortfolio()
+          setNotice({
+            kind: 'success',
+            title: 'Withdrawal queued',
+            message: 'Your holdings are being liquidated. SOL will arrive in your wallet shortly.',
+          })
+        }}
+      />
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <AllocationProgressModal
         depositId={allocation?.depositId ?? null}

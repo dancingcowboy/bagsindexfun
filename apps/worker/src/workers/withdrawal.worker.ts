@@ -19,16 +19,19 @@ interface WithdrawalJobData {
   withdrawalId: string
   userId: string
   subWalletId: string
+  /** 1–100 — percentage of each holding to sell. Defaults to 100 (full). */
+  pct?: number
 }
 
 /**
  * Withdrawal liquidation worker.
- * Sells all holdings back to SOL, transfers to user wallet.
+ * Sells holdings (all or a percentage) back to SOL, transfers to user wallet.
  */
 async function processWithdrawal(job: Job<WithdrawalJobData>) {
-  const { withdrawalId, userId, subWalletId } = job.data
+  const { withdrawalId, userId, subWalletId, pct = 100 } = job.data
+  const isPartial = pct < 100
   const logger = { info: console.log, error: console.error }
-  logger.info(`[withdrawal] Liquidating for withdrawal ${withdrawalId}`)
+  logger.info(`[withdrawal] Liquidating ${pct}% for withdrawal ${withdrawalId}`)
 
   const withdrawal = await db.withdrawal.findFirst({
     where: { id: withdrawalId, userId },
@@ -44,14 +47,22 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   let totalRecoveredLamports = 0n
   let failedTokens = 0
 
-  // Sell each holding sequentially
+  // Sell each holding sequentially (full or pct%)
   for (const holding of subWallet.holdings) {
     if (holding.amount <= 0n) continue
+
+    // For partial withdrawals, compute the fraction to sell
+    const sellAmount = isPartial
+      ? BigInt(Math.floor(Number(holding.amount) * pct / 100))
+      : holding.amount
+    if (sellAmount <= 0n) continue
+
+    const sellFraction = isPartial ? pct / 100 : 1
 
     try {
       const { txBytes, quote, route } = await buildSellTransaction({
         tokenMint: holding.tokenMint,
-        tokenAmount: holding.amount,
+        tokenAmount: sellAmount,
         userPublicKey: subWallet.address,
       })
 
@@ -63,10 +74,9 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
 
       totalRecoveredLamports += BigInt(quote.outAmount)
 
-      // Realized PnL: SOL out vs cost basis on full liquidation
       const solOut = Number(quote.outAmount) / LAMPORTS_PER_SOL
-      const costBasis = Number(holding.costBasisSol)
-      const realized = solOut - costBasis
+      const soldCostBasis = Number(holding.costBasisSol) * sellFraction
+      const realized = solOut - soldCostBasis
       await db.subWallet.update({
         where: { id: subWallet.id },
         data: { realizedPnlSol: { increment: realized } },
@@ -78,7 +88,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
           subWalletId: subWallet.id,
           inputMint: holding.tokenMint,
           outputMint: SOL_MINT,
-          inputAmount: holding.amount,
+          inputAmount: sellAmount,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
           route,
@@ -87,19 +97,38 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
         },
       })
 
-      // Clear holding
-      await db.holding.delete({
-        where: {
-          subWalletId_tokenMint: {
-            subWalletId: subWallet.id,
-            tokenMint: holding.tokenMint,
+      if (isPartial) {
+        // Trim the holding — keep the unsold portion
+        await db.holding.update({
+          where: {
+            subWalletId_tokenMint: {
+              subWalletId: subWallet.id,
+              tokenMint: holding.tokenMint,
+            },
           },
-        },
-      })
+          data: {
+            amount: { decrement: sellAmount },
+            valueSolEst: { decrement: Number(holding.valueSolEst) * sellFraction },
+            costBasisSol: { decrement: soldCostBasis },
+            totalSoldSol: { increment: solOut },
+            realizedPnlSol: { increment: realized },
+          },
+        })
+      } else {
+        // Full liquidation — delete the holding row
+        await db.holding.delete({
+          where: {
+            subWalletId_tokenMint: {
+              subWalletId: subWallet.id,
+              tokenMint: holding.tokenMint,
+            },
+          },
+        })
+      }
 
-      logger.info(`[withdrawal] Sold ${holding.tokenMint.slice(0, 8)}... → ${quote.outAmount} lamports`)
+      logger.info(`[withdrawal] Sold ${pct}% of ${holding.tokenMint.slice(0, 8)}… → ${quote.outAmount} lamports`)
     } catch (err) {
-      logger.error(`[withdrawal] Failed to sell ${holding.tokenMint.slice(0, 8)}...: ${err}`)
+      logger.error(`[withdrawal] Failed to sell ${holding.tokenMint.slice(0, 8)}…: ${err}`)
       failedTokens++
     }
   }

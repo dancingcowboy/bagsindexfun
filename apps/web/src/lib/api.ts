@@ -137,10 +137,10 @@ class ApiClient {
   }
 
   // Withdrawals
-  createWithdrawal() {
+  createWithdrawal(riskTier: string, pct?: number) {
     return this.fetch<{ data: any }>('/withdrawals', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ riskTier, ...(pct && pct < 100 ? { pct } : {}) }),
     })
   }
 

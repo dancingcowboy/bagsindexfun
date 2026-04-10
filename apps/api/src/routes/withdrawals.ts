@@ -14,7 +14,8 @@ export async function withdrawalRoutes(app: FastifyInstance) {
   app.post('/', async (req, reply) => {
     try {
       const userId = req.authUser!.userId
-      const { riskTier } = createWithdrawalSchema.parse(req.body)
+      const { riskTier, pct } = createWithdrawalSchema.parse(req.body)
+      const withdrawPct = pct ?? 100 // default: liquidate everything
 
       const subWallet = await db.subWallet.findUnique({
         where: { userId_riskTier: { userId, riskTier } },
@@ -31,16 +32,16 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         (sum, h) => sum + Number(h.valueSolEst),
         0
       )
+      const estimatedSol = totalValueSol * (withdrawPct / 100)
       // No withdrawal fee — user receives 100% of vault value (the BAGSX
       // slice is sold alongside every other holding by the worker).
       const feeSol = 0
-      const netSol = totalValueSol
 
       const withdrawal = await db.withdrawal.create({
         data: {
           userId,
           riskTier,
-          amountSol: totalValueSol,
+          amountSol: estimatedSol,
           feeSol,
           status: 'PENDING',
         },
@@ -50,15 +51,18 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         withdrawalId: withdrawal.id,
         userId,
         subWalletId: subWallet.id,
+        pct: withdrawPct,
       })
 
       return {
         success: true,
         data: {
           id: withdrawal.id,
-          estimatedSol: totalValueSol.toFixed(9),
+          riskTier,
+          pct: withdrawPct,
+          estimatedSol: estimatedSol.toFixed(9),
           feeSol: feeSol.toFixed(9),
-          netSol: netSol.toFixed(9),
+          netSol: estimatedSol.toFixed(9),
           status: withdrawal.status,
         },
       }

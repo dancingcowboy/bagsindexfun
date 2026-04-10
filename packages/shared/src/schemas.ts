@@ -31,6 +31,8 @@ export const createWithdrawalSchema = z.object({
   riskTier: riskTierSchema,
   /** If omitted, withdraw everything */
   amountSol: z.number().positive().optional(),
+  /** 1–100 — percentage of the tier to liquidate. Defaults to 100 (full). */
+  pct: z.number().int().min(1).max(100).optional(),
 })
 
 // ─── Tier Switch ─────────────────────────────────────────────────────────────
