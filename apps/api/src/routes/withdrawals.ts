@@ -73,6 +73,49 @@ export async function withdrawalRoutes(app: FastifyInstance) {
   })
 
   /**
+   * POST /withdrawals/:id/retry
+   * Re-enqueue a PARTIAL withdrawal so the worker retries unsold holdings.
+   */
+  app.post<{ Params: { id: string } }>('/:id/retry', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const withdrawal = await db.withdrawal.findFirst({
+        where: { id: req.params.id, userId },
+      })
+      if (!withdrawal) {
+        return reply.status(404).send({ error: 'Withdrawal not found' })
+      }
+      if (withdrawal.status !== 'PARTIAL') {
+        return reply.status(400).send({ error: `Cannot retry — status is ${withdrawal.status}` })
+      }
+
+      const subWallet = await db.subWallet.findUnique({
+        where: { userId_riskTier: { userId, riskTier: withdrawal.riskTier } },
+      })
+      if (!subWallet) {
+        return reply.status(400).send({ error: 'Sub-wallet not found' })
+      }
+
+      await db.withdrawal.update({
+        where: { id: withdrawal.id },
+        data: { status: 'PENDING' },
+      })
+
+      await withdrawalQueue.add('liquidate', {
+        withdrawalId: withdrawal.id,
+        userId,
+        subWalletId: subWallet.id,
+        pct: 100,
+      })
+
+      return { success: true, data: { id: withdrawal.id, status: 'PENDING' } }
+    } catch (err) {
+      app.log.error(err, 'Failed to retry withdrawal')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /withdrawals
    * List user's withdrawals.
    */

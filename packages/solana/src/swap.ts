@@ -128,8 +128,9 @@ export async function buildBuyTransaction(params: {
     return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
     if (!FALLBACK_ENABLED || !shouldFallbackToJupiter(err)) throw err
+    const e = err as { response?: { status?: number }; message?: string }
     console.warn(
-      `[swap] Bags unavailable for buy ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
+      `[swap] Bags unavailable for buy ${params.tokenMint.slice(0, 8)}… (${e?.response?.status ?? e?.message ?? 'unknown'}); falling through to Jupiter`,
     )
     const jq = await getJupiterQuote({
       inputMint: SOL_MINT,
@@ -175,8 +176,9 @@ export async function buildSellTransaction(params: {
     return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
     if (!FALLBACK_ENABLED || !shouldFallbackToJupiter(err)) throw err
+    const e = err as { response?: { status?: number }; message?: string }
     console.warn(
-      `[swap] Bags unavailable for sell ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
+      `[swap] Bags unavailable for sell ${params.tokenMint.slice(0, 8)}… (${e?.response?.status ?? e?.message ?? 'unknown'}); falling through to Jupiter`,
     )
     const jq = await getJupiterQuote({
       inputMint: params.tokenMint,

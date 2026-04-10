@@ -45,12 +45,28 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   })
   if (!subWallet) throw new Error(`Sub-wallet ${subWalletId} not found`)
 
+  // Idempotent re-run: skip tokens that were already sold in a prior attempt.
+  const priorSells = await db.swapExecution.findMany({
+    where: {
+      subWalletId: subWallet.id,
+      outputMint: SOL_MINT,
+      status: 'CONFIRMED',
+      executedAt: { gte: withdrawal.createdAt },
+    },
+    select: { inputMint: true },
+  })
+  const alreadySoldMints = new Set(priorSells.map((s) => s.inputMint))
+  if (alreadySoldMints.size > 0) {
+    logger.info(`[withdrawal] Resuming — ${alreadySoldMints.size} tokens already sold, skipping`)
+  }
+
   let totalRecoveredLamports = 0n
   let failedTokens = 0
 
   // Sell each holding sequentially (full or pct%)
   for (const holding of subWallet.holdings) {
     if (holding.amount <= 0n) continue
+    if (alreadySoldMints.has(holding.tokenMint)) continue
 
     // For partial withdrawals, compute the fraction to sell
     const sellAmount = isPartial
