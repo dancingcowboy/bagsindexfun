@@ -16,7 +16,35 @@ import {
   History,
   RefreshCw,
   Shuffle,
+  Copy,
+  Check,
 } from 'lucide-react'
+
+// Per-tier color tokens. Used to colour-code holdings by index and to
+// theme the tier filter pills on the constituent table. Picked so they
+// stay legible against the dark `--color-bg-primary` and don't collide
+// with the green primary accent.
+const TIER_COLORS: Record<string, { bg: string; border: string; text: string; chip: string }> = {
+  CONSERVATIVE: {
+    bg: 'rgba(56, 189, 248, 0.06)', // sky-400 wash
+    border: 'rgba(56, 189, 248, 0.35)',
+    text: '#7dd3fc',
+    chip: '#0ea5e9',
+  },
+  BALANCED: {
+    bg: 'rgba(168, 85, 247, 0.06)', // purple-500 wash
+    border: 'rgba(168, 85, 247, 0.35)',
+    text: '#c084fc',
+    chip: '#a855f7',
+  },
+  DEGEN: {
+    bg: 'rgba(244, 114, 182, 0.06)', // pink-400 wash
+    border: 'rgba(244, 114, 182, 0.35)',
+    text: '#f9a8d4',
+    chip: '#ec4899',
+  },
+}
+const TIER_LIST = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
@@ -52,6 +80,17 @@ export default function DashboardPage() {
     tier: string
     amountSol: number
   } | null>(null)
+  // Filter for the "Current Index" constituent table at the bottom.
+  // Lets users compare each tier's top-10 token weights side by side.
+  const [indexTier, setIndexTier] = useState<'CONSERVATIVE' | 'BALANCED' | 'DEGEN'>('BALANCED')
+  const [copiedAddr, setCopiedAddr] = useState<string | null>(null)
+  const copyAddr = async (addr: string) => {
+    try {
+      await navigator.clipboard.writeText(addr)
+      setCopiedAddr(addr)
+      setTimeout(() => setCopiedAddr((cur) => (cur === addr ? null : cur)), 1500)
+    } catch {}
+  }
 
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
@@ -77,8 +116,8 @@ export default function DashboardPage() {
   })
 
   const { data: indexData } = useQuery({
-    queryKey: ['index-current'],
-    queryFn: () => api.getIndexCurrent(),
+    queryKey: ['index-current', indexTier],
+    queryFn: () => api.getIndexCurrent(indexTier),
     refetchInterval: 60_000,
   })
 
@@ -481,71 +520,132 @@ export default function DashboardPage() {
               {portfolioFetching ? 'Refreshing…' : portfolioLive ? 'Refresh (live)' : 'Refresh Holdings'}
             </button>
           </div>
-          <div className="card overflow-hidden p-0">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--color-border)]">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Token
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Amount
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Value (SOL)
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                    Allocation
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {holdings.length > 0 ? (
-                  holdings.map((h: any) => (
-                    <tr
-                      key={h.tokenMint}
-                      className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)]"
+          {portfolioTiers.length === 0 || holdings.length === 0 ? (
+            <div className="card p-12 text-center text-[var(--color-text-muted)]">
+              No holdings yet — deposit SOL to start investing
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {portfolioTiers
+                .filter((t: any) => (t.holdings ?? []).length > 0)
+                .map((t: any) => {
+                  const c = TIER_COLORS[t.riskTier] ?? TIER_COLORS.BALANCED
+                  const tierHoldings = t.holdings ?? []
+                  const tierValue = tierHoldings.reduce(
+                    (s: number, h: any) => s + Number(h.valueSol ?? 0),
+                    0,
+                  )
+                  const addr: string | undefined = t.walletAddress
+                  return (
+                    <div
+                      key={t.riskTier}
+                      className="overflow-hidden rounded-2xl border"
+                      style={{ background: c.bg, borderColor: c.border }}
                     >
-                      <td className="px-6 py-4 text-sm">
-                        <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
-                        <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
-                          {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right font-[family-name:var(--font-mono)] text-sm">
-                        {Number(h.amount).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-right font-[family-name:var(--font-mono)] text-sm">
-                        {Number(h.valueSol).toFixed(4)}
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="h-2 w-16 rounded-full bg-[var(--color-bg-secondary)] overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-[var(--color-accent)]"
-                              style={{ width: `${h.allocationPct}%` }}
-                            />
-                          </div>
-                          <span className="font-[family-name:var(--font-mono)] text-sm text-[var(--color-text-muted)]">
-                            {h.allocationPct}%
+                      {/* Tier header strip with colour-coded label + sub-wallet CA */}
+                      <div
+                        className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"
+                        style={{ borderBottom: `1px solid ${c.border}` }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
+                            style={{ background: c.chip, color: '#0a0a0a' }}
+                          >
+                            {t.riskTier}
+                          </span>
+                          <span className="text-xs text-[var(--color-text-muted)]">
+                            {tierHoldings.length} holdings · {tierValue.toFixed(4)} SOL
                           </span>
                         </div>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-6 py-12 text-center text-[var(--color-text-muted)]"
-                    >
-                      No holdings yet — deposit SOL to start investing
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                        {addr && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                              Sub-wallet
+                            </span>
+                            <a
+                              href={`https://solscan.io/account/${addr}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-[family-name:var(--font-mono)] text-xs"
+                              style={{ color: c.text }}
+                              title="Open on Solscan"
+                            >
+                              {addr.slice(0, 6)}…{addr.slice(-6)}
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => copyAddr(addr)}
+                              className="rounded p-1 hover:bg-white/5"
+                              title="Copy full address — paste into Phantom or any wallet watcher"
+                            >
+                              {copiedAddr === addr ? (
+                                <Check className="h-3 w-3" style={{ color: c.text }} />
+                              ) : (
+                                <Copy
+                                  className="h-3 w-3 text-[var(--color-text-muted)]"
+                                />
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <table className="w-full">
+                        <thead>
+                          <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+                            <th className="px-5 py-2 text-left font-medium">Token</th>
+                            <th className="px-5 py-2 text-right font-medium">Amount</th>
+                            <th className="px-5 py-2 text-right font-medium">Value (SOL)</th>
+                            <th className="px-5 py-2 text-right font-medium">Allocation</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tierHoldings.map((h: any) => (
+                            <tr
+                              key={`${t.riskTier}:${h.tokenMint}`}
+                              className="border-t hover:bg-white/[0.02]"
+                              style={{ borderColor: c.border }}
+                            >
+                              <td className="px-5 py-3 text-sm">
+                                <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
+                                <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                                  {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
+                                </div>
+                              </td>
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
+                                {Number(h.amount).toLocaleString()}
+                              </td>
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
+                                {Number(h.valueSol).toFixed(4)}
+                              </td>
+                              <td className="px-5 py-3 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <div className="h-2 w-16 overflow-hidden rounded-full bg-black/30">
+                                    <div
+                                      className="h-full rounded-full"
+                                      style={{
+                                        width: `${h.allocationPct}%`,
+                                        background: c.chip,
+                                      }}
+                                    />
+                                  </div>
+                                  <span
+                                    className="font-[family-name:var(--font-mono)] text-sm"
+                                    style={{ color: c.text }}
+                                  >
+                                    {h.allocationPct}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })}
+            </div>
+          )}
         </motion.div>
 
         {/* Next cycle countdown per tier */}
@@ -564,13 +664,42 @@ export default function DashboardPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
         >
-          <div className="flex items-center gap-2 mb-4">
-            <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
-              Current Index
-            </h2>
-            <RefreshCw className="h-4 w-4 text-[var(--color-text-muted)]" />
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
+                Current Index
+              </h2>
+              <RefreshCw className="h-4 w-4 text-[var(--color-text-muted)]" />
+            </div>
+            <div className="flex gap-2">
+              {TIER_LIST.map((tier) => {
+                const c = TIER_COLORS[tier]
+                const active = indexTier === tier
+                return (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() => setIndexTier(tier)}
+                    className="rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-wider transition-colors"
+                    style={
+                      active
+                        ? { background: c.chip, borderColor: c.chip, color: '#0a0a0a' }
+                        : { background: 'transparent', borderColor: c.border, color: c.text }
+                    }
+                  >
+                    {tier}
+                  </button>
+                )
+              })}
+            </div>
           </div>
-          <div className="card overflow-hidden p-0">
+          <div
+            className="overflow-hidden rounded-2xl border p-0"
+            style={{
+              background: TIER_COLORS[indexTier].bg,
+              borderColor: TIER_COLORS[indexTier].border,
+            }}
+          >
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--color-border)]">
@@ -593,7 +722,8 @@ export default function DashboardPage() {
                   tokens.map((t: any) => (
                     <tr
                       key={t.tokenMint}
-                      className="border-b border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-hover)]"
+                      className="border-t hover:bg-white/[0.02]"
+                      style={{ borderColor: TIER_COLORS[indexTier].border }}
                     >
                       <td className="px-6 py-3 font-[family-name:var(--font-mono)] text-sm">
                         {t.rank}
@@ -604,7 +734,10 @@ export default function DashboardPage() {
                       <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
                         {Number(t.compositeScore).toFixed(4)}
                       </td>
-                      <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm text-[var(--color-accent)]">
+                      <td
+                        className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm"
+                        style={{ color: TIER_COLORS[indexTier].text }}
+                      >
                         {t.weightPct}%
                       </td>
                     </tr>

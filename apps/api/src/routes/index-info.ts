@@ -56,14 +56,23 @@ export async function indexInfoRoutes(app: FastifyInstance) {
    * GET /index/current
    * Current top 10 tokens with scores and weights.
    */
-  app.get('/current', async (_req, reply) => {
+  app.get<{ Querystring: { tier?: string } }>('/current', async (req, reply) => {
     try {
+      // Optional tier filter — when omitted, returns the most recently
+      // completed cycle (whichever tier ran last). Dashboard passes
+      // ?tier=… to scope the constituent table to a single index.
+      const tierParam = req.query.tier?.toUpperCase()
+      const allowed = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
+      const tierFilter =
+        tierParam && (allowed as readonly string[]).includes(tierParam)
+          ? (tierParam as (typeof allowed)[number])
+          : undefined
       const latestCycle = await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', ...(tierFilter ? { tier: tierFilter } : {}) },
         orderBy: { completedAt: 'desc' },
         include: {
           scores: {
-            where: { isBlacklisted: false },
+            where: { isBlacklisted: false, ...(tierFilter ? { riskTier: tierFilter } : {}) },
             orderBy: { rank: 'asc' },
             take: 10,
           },

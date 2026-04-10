@@ -149,8 +149,8 @@ class ApiClient {
   }
 
   // Index (public)
-  getIndexCurrent() {
-    return this.fetch<{ data: any }>('/index/current')
+  getIndexCurrent(tier?: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN') {
+    return this.fetch<{ data: any }>(`/index/current${tier ? `?tier=${tier}` : ''}`)
   }
 
   getIndexHistory() {
