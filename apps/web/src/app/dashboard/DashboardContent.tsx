@@ -15,7 +15,6 @@ import {
   PieChart,
   History,
   RefreshCw,
-  Shuffle,
   Copy,
   Check,
 } from 'lucide-react'
@@ -73,7 +72,6 @@ function CopyCAButton({ mint }: { mint: string }) {
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
 import { MoneyWeightedPnlChart } from '@/components/MoneyWeightedPnlChart'
-import { SwitchIndexModal } from '@/components/SwitchIndexModal'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { Notice, type NoticeState } from '@/components/Notice'
 import { AllocationProgressModal } from '@/components/AllocationProgressModal'
@@ -93,7 +91,6 @@ export default function DashboardPage() {
   const [depositing, setDepositing] = useState(false)
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [showWithdraw, setShowWithdraw] = useState(false)
-  const [showSwitch, setShowSwitch] = useState(false)
   // Default to live mode so totalValueSol includes the sub-wallet's native
   // SOL balance (unspent after liquidity-cap clamps) and uses current prices
   // instead of stale valueSolEst from DB.
@@ -295,14 +292,6 @@ export default function DashboardPage() {
                 <ArrowDownToLine className="h-4 w-4" /> Deposit
               </button>
               <button
-                onClick={() => setShowSwitch(true)}
-                disabled={(pnlData?.data?.tiers ?? []).every((t: any) => parseFloat(t.currentValueSol ?? '0') <= 0)}
-                className="btn-outline flex items-center gap-2 text-sm disabled:opacity-40"
-                title="Move your position between indexes (1% flat fee)"
-              >
-                <Shuffle className="h-4 w-4" /> Switch Index
-              </button>
-              <button
                 onClick={() => setShowWithdraw(true)}
                 disabled={holdings.length === 0}
                 className="btn-outline flex items-center gap-2 text-sm disabled:opacity-40"
@@ -415,17 +404,6 @@ export default function DashboardPage() {
             </div>
           </motion.div>
         )}
-
-        {/* Deposit Modal */}
-        <SwitchIndexModal
-          open={showSwitch}
-          onClose={() => setShowSwitch(false)}
-          tiers={(pnlData?.data?.tiers ?? []).map((t: any) => ({
-            riskTier: t.riskTier,
-            totalValueSol: t.currentValueSol ?? '0',
-          }))}
-          onSwitched={() => refetchPortfolio()}
-        />
 
         {showDeposit && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
