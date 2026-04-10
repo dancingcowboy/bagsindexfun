@@ -86,9 +86,49 @@ async function processDeposit(job: Job<DepositJobData>) {
     0
   )
 
+  // Pre-create PENDING swap rows so the allocation modal can show all
+  // expected swaps immediately, not only the ones already confirmed.
+  const pendingSwaps: { id: string; mint: string; lamports: bigint }[] = []
+  if (bagsxSol > 0) {
+    const bagsxLamports = BigInt(Math.floor(bagsxSol * LAMPORTS_PER_SOL))
+    const row = await db.swapExecution.create({
+      data: {
+        subWalletId: subWallet.id,
+        inputMint: SOL_MINT,
+        outputMint: BAGSX_MINT,
+        inputAmount: bagsxLamports,
+        outputAmount: null,
+        slippageBps: 0,
+        route: 'pending',
+        status: 'PENDING',
+      },
+    })
+    pendingSwaps.push({ id: row.id, mint: BAGSX_MINT, lamports: bagsxLamports })
+  }
+  for (const score of latestCycle.scores) {
+    const weightPct = Number(score.compositeScore) / totalScore
+    const desiredSol = allocatableSol * weightPct
+    const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
+    if (desiredLamports <= 0n) continue
+    const row = await db.swapExecution.create({
+      data: {
+        subWalletId: subWallet.id,
+        inputMint: SOL_MINT,
+        outputMint: score.tokenMint,
+        inputAmount: desiredLamports,
+        outputAmount: null,
+        slippageBps: 0,
+        route: 'pending',
+        status: 'PENDING',
+      },
+    })
+    pendingSwaps.push({ id: row.id, mint: score.tokenMint, lamports: desiredLamports })
+  }
+
   // Buy the fixed BAGSX slice first (same pipeline — recorded as a holding
   // and rebalanced identically to any other position).
-  if (bagsxSol > 0) {
+  const bagsxPending = pendingSwaps.find((p) => p.mint === BAGSX_MINT)
+  if (bagsxSol > 0 && bagsxPending) {
     const bagsxLamports = BigInt(Math.floor(bagsxSol * LAMPORTS_PER_SOL))
     try {
       const capped = await capInputToLiquidity(BAGSX_MINT, bagsxLamports)
@@ -103,17 +143,16 @@ async function processDeposit(job: Job<DepositJobData>) {
         txBytes,
       })
       const sig = await submitAndConfirmDirect(signed)
-      await db.swapExecution.create({
+      await db.swapExecution.update({
+        where: { id: bagsxPending.id },
         data: {
-          subWalletId: subWallet.id,
-          inputMint: SOL_MINT,
-          outputMint: BAGSX_MINT,
           inputAmount: capped,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
           route,
           status: 'CONFIRMED',
           txSignature: sig,
+          confirmedAt: new Date(),
         },
       })
       await db.holding.upsert({
@@ -138,6 +177,10 @@ async function processDeposit(job: Job<DepositJobData>) {
       logger.info(`[deposit] Bought BAGSX slice: ${solForBagsx.toFixed(4)} SOL`)
     } catch (err) {
       logger.error(`[deposit] Failed to buy BAGSX slice: ${err}`)
+      await db.swapExecution.update({
+        where: { id: bagsxPending.id },
+        data: { status: 'FAILED', errorMessage: String(err).slice(0, 500) },
+      }).catch(() => {})
     }
   }
 
@@ -147,14 +190,11 @@ async function processDeposit(job: Job<DepositJobData>) {
   let swapIdx = 0
   for (const score of latestCycle.scores) {
     if (swapIdx++ > 0) await new Promise((r) => setTimeout(r, 600))
-    const weightPct = Number(score.compositeScore) / totalScore
-    const desiredSol = allocatableSol * weightPct
-    const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
-
-    if (desiredLamports <= 0n) continue
+    const pending = pendingSwaps.find((p) => p.mint === score.tokenMint)
+    if (!pending) continue
 
     // Cap to ≤2% of token's available SOL liquidity to limit slippage impact
-    const lamports = await capInputToLiquidity(score.tokenMint, desiredLamports)
+    const lamports = await capInputToLiquidity(score.tokenMint, pending.lamports)
     const solForToken = Number(lamports) / LAMPORTS_PER_SOL
 
     try {
@@ -171,17 +211,16 @@ async function processDeposit(job: Job<DepositJobData>) {
       })
       const sig = await submitAndConfirmDirect(signed)
 
-      await db.swapExecution.create({
+      await db.swapExecution.update({
+        where: { id: pending.id },
         data: {
-          subWalletId: subWallet.id,
-          inputMint: SOL_MINT,
-          outputMint: score.tokenMint,
           inputAmount: lamports,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
           route,
           status: 'CONFIRMED',
           txSignature: sig,
+          confirmedAt: new Date(),
         },
       })
 
@@ -214,6 +253,12 @@ async function processDeposit(job: Job<DepositJobData>) {
       )
     } catch (err) {
       logger.error(`[deposit] Failed to buy ${score.tokenSymbol}: ${err}`)
+      if (pending) {
+        await db.swapExecution.update({
+          where: { id: pending.id },
+          data: { status: 'FAILED', errorMessage: String(err).slice(0, 500) },
+        }).catch(() => {})
+      }
       // Continue with other tokens — don't fail entire allocation
     }
   }

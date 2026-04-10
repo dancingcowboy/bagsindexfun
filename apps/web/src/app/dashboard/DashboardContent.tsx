@@ -539,10 +539,8 @@ export default function DashboardPage() {
                 .map((t: any) => {
                   const c = TIER_COLORS[t.riskTier] ?? TIER_COLORS.BALANCED
                   const tierHoldings = t.holdings ?? []
-                  const tierValue = tierHoldings.reduce(
-                    (s: number, h: any) => s + Number(h.valueSol ?? 0),
-                    0,
-                  )
+                  const nativeSol = Number(t.nativeSol ?? 0)
+                  const tierValue = Number(t.totalValueSol ?? 0)
                   const addr: string | undefined = t.walletAddress
                   return (
                     <div
@@ -666,6 +664,26 @@ export default function DashboardPage() {
                               </td>
                             </tr>
                           ))}
+                          {nativeSol > 0.001 && (
+                            <tr
+                              className="border-t hover:bg-white/[0.02]"
+                              style={{ borderColor: c.border }}
+                            >
+                              <td className="px-5 py-3 text-sm">
+                                <div className="font-semibold text-[var(--color-text-muted)]">SOL</div>
+                                <div className="text-[10px] text-[var(--color-text-muted)]">gas reserve</div>
+                              </td>
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">—</td>
+                              <td className="px-5 py-3" />
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm text-[var(--color-text-muted)]">
+                                {nativeSol.toFixed(4)}
+                              </td>
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm text-[var(--color-text-muted)]">
+                                {nativeSol.toFixed(4)}
+                              </td>
+                              <td className="px-5 py-3" />
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>

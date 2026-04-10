@@ -160,8 +160,11 @@ export function AllocationProgressModal({
             </div>
 
             {progress?.done && (
-              <div className="border-t border-[var(--color-border)] bg-[#00D62B]/10 px-5 py-3 text-sm text-[#00D62B]">
-                Allocation complete — refreshing your portfolio…
+              <div className="border-t border-[var(--color-border)] bg-[#00D62B]/10 px-5 py-3">
+                <div className="text-sm text-[#00D62B]">Allocation complete</div>
+                <div className="text-xs text-[#00D62B]/70 mt-1">
+                  Your holdings will appear in the dashboard within a few moments as prices are confirmed on-chain.
+                </div>
               </div>
             )}
           </motion.div>

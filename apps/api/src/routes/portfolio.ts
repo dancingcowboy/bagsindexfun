@@ -297,16 +297,23 @@ export async function portfolioRoutes(app: FastifyInstance) {
         db.deposit.groupBy({
           by: ['riskTier'],
           where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
-          _sum: { amountSol: true },
+          _sum: { amountSol: true, feeSol: true },
         }),
         db.withdrawal.groupBy({
           by: ['riskTier'],
           where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
-          _sum: { amountSol: true },
+          _sum: { amountSol: true, feeSol: true },
         }),
       ])
+      // Cost basis = net capital in the vault (deposits minus fees minus withdrawals).
+      // Fees never enter the vault so excluding them prevents an instant
+      // negative PnL equal to the fee amount.
       const netDepositedByTier = new Map<string, number>()
-      for (const d of depositRows) netDepositedByTier.set(d.riskTier, Number(d._sum.amountSol ?? 0))
+      for (const d of depositRows) {
+        const gross = Number(d._sum.amountSol ?? 0)
+        const fee = Number(d._sum.feeSol ?? 0)
+        netDepositedByTier.set(d.riskTier, gross - fee)
+      }
       for (const w of withdrawalRows) {
         netDepositedByTier.set(
           w.riskTier,
