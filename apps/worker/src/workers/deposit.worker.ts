@@ -189,7 +189,7 @@ async function processDeposit(job: Job<DepositJobData>) {
   // fans out into 11 back-to-back quote+swap pairs.
   let swapIdx = 0
   for (const score of latestCycle.scores) {
-    if (swapIdx++ > 0) await new Promise((r) => setTimeout(r, 600))
+    if (swapIdx++ > 0) await new Promise((r) => setTimeout(r, 2000))
     const pending = pendingSwaps.find((p) => p.mint === score.tokenMint)
     if (!pending) continue
 
