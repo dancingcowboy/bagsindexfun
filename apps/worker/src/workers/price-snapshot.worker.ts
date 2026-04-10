@@ -119,7 +119,7 @@ export async function processSnapshot(_job?: Job) {
     })
     for (const s of recentScores) uniqueMints.add(s.tokenMint)
 
-    // Always sample the platform token ($BAGSX) — every vault holds 8%
+    // Always sample the platform token ($BAGSX) — every vault holds 10%
     // exposure to it, so the chart needs a continuous price series.
     uniqueMints.add(BAGSX_MINT)
 

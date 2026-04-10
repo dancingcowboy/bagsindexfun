@@ -277,7 +277,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
             (Number(s.compositeScore) / totalScore) * scoredScale,
           )
         }
-        // Inject BAGSX as a fixed 8% basket component. SOL anchor is
+        // Inject BAGSX as a fixed 10% basket component. SOL anchor is
         // treated as cash — it doesn't move against SOL so it contributes
         // 0 return; we simply don't add it to `weights`.
         weights.set(BAGSX_MINT, BAGSX_WEIGHT_PCT / 100)

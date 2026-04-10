@@ -49,7 +49,7 @@ export async function depositRoutes(app: FastifyInstance) {
         }
       }
 
-      // No deposit fee — the vault instead holds a fixed 8% BAGSX exposure,
+      // No deposit fee — the vault instead holds a fixed 10% BAGSX exposure,
       // bought via the standard allocation + rebalance pipeline.
       const feeSol = 0
       const netAmountSol = amountSol

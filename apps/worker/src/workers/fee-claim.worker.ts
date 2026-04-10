@@ -47,7 +47,7 @@ async function getVaultSubWallets() {
  *    are 3 sub-wallets (CONSERVATIVE, BALANCED, DEGEN), each gets 1/3.
  * 3. For each tier, create a Deposit row and enqueue a deposit-allocation
  *    job so the normal allocation pipeline invests it into that tier's
- *    scored tokens + 8% BAGSX slice.
+ *    scored tokens + 10% BAGSX slice.
  *
  * The primary wallet may or may not be one of the tier sub-wallets. If
  * it IS (e.g. it's the BALANCED sub-wallet), no SOL transfer is needed

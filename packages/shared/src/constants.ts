@@ -1,13 +1,13 @@
 // ─── Platform Token Exposure ─────────────────────────────────────────────────
 
 /**
- * Every index vault (user + protocol system vault) holds a fixed 8% slice in
+ * Every index vault (user + protocol system vault) holds a fixed 10% slice in
  * $BAGSX, the platform token. Every participant is directly exposed to the
  * platform's upside via native token holdings. No deposit, withdrawal, or
  * switch fees. Sold back to SOL on withdrawal like any other holding.
  */
 export const BAGSX_MINT = 'DTp6oMA51WydSAcqY8cgYCFTtQXcQHNq5geCSgrwBAGS'
-export const BAGSX_WEIGHT_PCT = 8
+export const BAGSX_WEIGHT_PCT = 10
 
 // ─── Risk Tiers ─────────────────────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ export const TIER_SCORING_CONFIG = {
     minHolderCount: 200,
     minAgeDays: 5,
     maxVolatility7d: 0.6,
-    /** SOL anchor allocation — Conservative holds 12% SOL + 8% BAGSX (exposure). */
+    /** SOL anchor allocation — Conservative holds 12% SOL + 10% BAGSX (exposure). */
     solAnchorPct: 12,
   },
   BALANCED: {

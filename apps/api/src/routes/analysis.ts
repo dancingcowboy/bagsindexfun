@@ -43,7 +43,7 @@ function formatAllocations(allocations: any[]) {
       tokenSymbol: 'BAGSX',
       tokenName: 'Bags Index',
       weightPct: BAGSX_WEIGHT_PCT,
-      reasoning: 'Fixed 8% platform-token slice held by every vault',
+      reasoning: 'Fixed 10% platform-token slice held by every vault',
       confidence: 'high',
       signals: ['Platform Token', 'Fixed Allocation'],
     })

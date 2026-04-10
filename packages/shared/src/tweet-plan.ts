@@ -23,7 +23,7 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `three tiers, three personalities:\n\n🟦 conservative — SOL anchored, mature tokens, 24h rebalance\n🟩 balanced — top performers, 12h rebalance\n🟧 degen — high momentum, 4h rebalance\n\npick your appetite.`, imageQuery: 'three doors' },
   { text: `every Bags token earns its place in the index by score, not vibes:\n\n• 24h volume\n• holder growth\n• liquidity depth\n\nthen an autonomous Claude agent reviews the top picks and ejects anything that smells. fully transparent.`, imageQuery: 'data dashboard' },
   { text: `non-custodial by design.\n\nyour funds live in per-tier sub-wallets signed by Privy's HSM. we never touch a private key. you withdraw whenever you want.`, imageQuery: 'vault security' },
-  { text: `$BAGSX is live on Bags.\n\nCA: ${CA}\n\nevery index vault — user and protocol — holds a fixed 8% slice of it. ${X}`, imageQuery: 'platform token' },
+  { text: `$BAGSX is live on Bags.\n\nCA: ${CA}\n\nevery index vault — user and protocol — holds a fixed 10% slice of it. ${X}`, imageQuery: 'platform token' },
 
   // ─── Day 2 — How it works ─────────────────────────────────────────────────
   { text: `how the scoring works (1/3):\n\nevery 24h we pull every Bags token from the launch feed, grab volume + holders + liquidity from Helius, and compute a composite score.\n\ntop 10 by tier go in.`, imageQuery: 'algorithm code' },
@@ -119,7 +119,7 @@ export const TWEET_PLAN: PlannedTweet[] = [
   { text: `what's next (in priority order):\n\n1. portfolio chart in SOL terms\n2. tier comparison view\n3. project leaderboard polish\n4. mobile-first dashboard\n5. real-time SSE updates\n\nshipping weekly.`, imageQuery: 'roadmap path' },
   { text: `the metric i actually care about, two weeks in:\n\nnot TVL. not deposits. not Twitter followers.\n\n"how many users came back for a second deposit." that's the only number that means the product works. ${X}`, imageQuery: 'returning home' },
   { text: `if the only thing you remember from this campaign is one thing, make it this:\n\nyou don't have to pick the winner. you can own the basket. you can sleep. that's it. that's the whole product.`, imageQuery: 'one bag basket' },
-  { text: `$BAGSX exists because the index needed value capture without a treasury wallet that could dump.\n\nevery vault holds 8%. no team allocation, no unlocks. CA: ${CA}`, imageQuery: 'patient waiting' },
+  { text: `$BAGSX exists because the index needed value capture without a treasury wallet that could dump.\n\nevery vault holds 10%. CA: ${CA}`, imageQuery: 'patient waiting' },
   { text: `gm. day 14 of @bagsindex in public.\n\nif you've been here from day 1 — thank you. if you just got here — welcome. either way, the index keeps running and the boring keeps compounding. ${X}`, imageQuery: 'thank you notes' },
 ]
 
