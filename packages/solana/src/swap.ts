@@ -87,10 +87,13 @@ export interface BuiltSwap {
 
 const FALLBACK_ENABLED = process.env.BAGS_FALLBACK_ENABLED !== 'false'
 
-function isBagsQuotaError(err: unknown): boolean {
-  const e = err as { response?: { status?: number; data?: { remaining?: number } }; message?: string }
+function shouldFallbackToJupiter(err: unknown): boolean {
+  const e = err as { response?: { status?: number; data?: { remaining?: number } }; message?: string; code?: string }
   if (e?.response?.status === 429) return true
+  if (e?.response?.status && e.response.status >= 500) return true
   if (e?.message?.includes('Bags API quota drained')) return true
+  // Network errors (ECONNREFUSED, ENOTFOUND, ETIMEDOUT, etc.)
+  if (e?.code?.startsWith('E')) return true
   return false
 }
 
@@ -124,7 +127,7 @@ export async function buildBuyTransaction(params: {
     const tippedBytes = await addJitoTip(rawBytes, feePayer)
     return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
-    if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
+    if (!FALLBACK_ENABLED || !shouldFallbackToJupiter(err)) throw err
     console.warn(
       `[swap] Bags unavailable for buy ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
     )
@@ -171,7 +174,7 @@ export async function buildSellTransaction(params: {
     const tippedBytes = await addJitoTip(rawBytes, feePayer)
     return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
-    if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
+    if (!FALLBACK_ENABLED || !shouldFallbackToJupiter(err)) throw err
     console.warn(
       `[swap] Bags unavailable for sell ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
     )
