@@ -36,6 +36,7 @@ const HELIUS_TIP_ACCOUNTS = [
   '3KCKozbAaF75qEU33jtzozcJ29yJuaLJTy2jFdzUY8bT',
   '4vieeGHPYPG2MmyPRcYjdiDmmhN3ww7hsFNap8pVN3Ey',
   '4TQLFNWK8AovT1gFvda5jfw2oJeRMKEmw7aH6MGBJ3or',
+  'D1Mc6j9xQWgR1o1Z7yU5nVVXFQiAYx7FG9AW1aVfwrUM',
 ]
 const JITO_TIP_LAMPORTS = 200_000 // 0.0002 SOL — Helius Sender minimum
 
@@ -149,10 +150,14 @@ export async function buildBuyTransaction(params: {
       throw quoteErr
     }
     try {
-      // Jupiter swap already includes jitoTipLamports in the built tx.
+      // Jupiter's built-in jitoTipLamports sends to standard Jito accounts,
+      // but we submit via Helius Sender which only accepts Helius wallets.
+      // So we add the Helius tip manually, same as the Bags path.
       const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+      const jupBytes = Buffer.from(jSwap.swapTransaction, 'base64')
+      const tippedBytes = await addJitoTip(jupBytes, feePayer)
       return {
-        txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+        txBytes: tippedBytes,
         quote: jq,
         route: 'JUPITER',
       }
@@ -209,8 +214,10 @@ export async function buildSellTransaction(params: {
     }
     try {
       const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+      const jupBytes = Buffer.from(jSwap.swapTransaction, 'base64')
+      const tippedBytes = await addJitoTip(jupBytes, feePayer)
       return {
-        txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+        txBytes: tippedBytes,
         quote: jq,
         route: 'JUPITER',
       }
