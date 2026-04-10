@@ -5,73 +5,54 @@ import {
   buildClaimFeeTransactions,
   signVersionedTxBase58,
   submitAndConfirmDirect,
+  transferSolFromServerWallet,
+  getNativeSolBalance,
 } from '@bags-index/solana'
 import {
   QUEUE_FEE_CLAIM,
   QUEUE_DEPOSIT,
   LAMPORTS_PER_SOL,
+  WALLET_RESERVE_SOL,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
 const depositQueue = new Queue(QUEUE_DEPOSIT, { connection: redis })
 
-// Stable identifier for the protocol's own "user" — owns the vault sub-wallet
-// that auto-claimed Bags fees flow into. Treated identically to a real user by
-// the deposit/rebalance pipeline.
+// Stable identifier for the protocol's own "user" — owns the vault sub-wallets
+// that auto-claimed Bags fees flow into. One sub-wallet per tier, all
+// sharing a single on-chain fee-claim address.
 const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
 
 /**
- * Ensure the protocol vault is registered as a system user with a single
- * sub-wallet pointing at the on-chain vault wallet. The sub-wallet's
- * `riskTier` may have been mutated by an admin vault-switch — we look it
- * up by privyUserId rather than assuming BALANCED, so fee deposits keep
- * landing in whatever tier the vault is currently configured for. The
- * default tier on first creation is BALANCED. Idempotent.
+ * Ensure the protocol vault user + all 3 tier sub-wallets exist.
+ * The PRIMARY sub-wallet (the one registered with Bags as fee recipient)
+ * is identified by `VAULT_WALLET_ADDRESS`. The other two are tier-specific
+ * sub-wallets created via `/admin/vault-expand`. Returns all 3 (or however
+ * many exist — gracefully handles the pre-expansion state where only 1 exists).
  */
-async function ensureSystemVaultSubWallet(
-  vaultAddress: string,
-  vaultPrivyWalletId: string,
-) {
-  const user = await db.user.upsert({
+async function getVaultSubWallets() {
+  const user = await db.user.findUnique({
     where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
-    update: {},
-    create: {
-      privyUserId: SYSTEM_VAULT_PRIVY_ID,
-      walletAddress: vaultAddress,
-    },
+    include: { subWallets: true },
   })
-  // Look up the vault sub-wallet by userId only — the protocol vault has
-  // exactly one sub-wallet whose riskTier may change over time.
-  let subWallet = await db.subWallet.findFirst({
-    where: { userId: user.id },
-  })
-  if (!subWallet) {
-    subWallet = await db.subWallet.create({
-      data: {
-        userId: user.id,
-        privyWalletId: vaultPrivyWalletId,
-        address: vaultAddress,
-        riskTier: 'BALANCED',
-      },
-    })
-  }
-  return { user, subWallet }
+  return user
 }
 
 /**
  * Vault fee-claim worker.
  *
- * Bags trading fees on the platform token are split natively by Bags into two
- * recipient wallets: the team treasury (claimed manually) and the protocol
- * vault (this worker). The vault wallet's accrued fees are claimed every 4h
- * via the Bags API. The claimed SOL is treated as a fee-free deposit into
- * the vault — allocated across the standard index composition (scored
- * tokens + 8% BAGSX slice + tier SOL anchor), identical to a user deposit.
+ * 1. Claim accrued Bags trading fees to the primary vault wallet (the one
+ *    registered with Bags as fee-share recipient).
+ * 2. Split the claimed SOL equally across all tier sub-wallets. If there
+ *    are 3 sub-wallets (CONSERVATIVE, BALANCED, DEGEN), each gets 1/3.
+ * 3. For each tier, create a Deposit row and enqueue a deposit-allocation
+ *    job so the normal allocation pipeline invests it into that tier's
+ *    scored tokens + 8% BAGSX slice.
  *
- * Signing path: vault is a Privy Server Wallet — we never hold the private
- * key. The privy.walletApi.signTransaction call is stubbed below until the
- * Privy server-wallet integration lands (same status as the user sub-wallet
- * signing in apps/api/src/routes/auth.ts).
+ * The primary wallet may or may not be one of the tier sub-wallets. If
+ * it IS (e.g. it's the BALANCED sub-wallet), no SOL transfer is needed
+ * for that tier — only the other two get a transfer. If it ISN'T (edge
+ * case), all three get a transfer.
  */
 async function processFeeClaim(_job: Job) {
   const logger = { info: console.log, error: console.error }
@@ -101,7 +82,7 @@ async function processFeeClaim(_job: Job) {
     return
   }
 
-  // 2. Claim each position. Track total SOL claimed for the deposit enqueue.
+  // 2. Claim each position
   let totalLamportsClaimed = 0n
   for (const pos of withFees) {
     try {
@@ -138,48 +119,108 @@ async function processFeeClaim(_job: Job) {
 
   if (totalLamportsClaimed <= 0n) return
 
-  const totalSol = Number(totalLamportsClaimed) / LAMPORTS_PER_SOL
+  // 3. Fetch all vault sub-wallets
+  const vaultUser = await getVaultSubWallets()
+  if (!vaultUser || vaultUser.subWallets.length === 0) {
+    logger.error('[fee-claim] Protocol vault user or sub-wallets not found')
+    return
+  }
 
-  // 3. Make sure the system vault sub-wallet exists, then create a Deposit
-  // row for it and enqueue the same allocation jobs that a real
-  // user deposit would. Auto-claimed fees flow into whichever tier the
-  // protocol vault is currently configured for (default BALANCED, but an
-  // admin vault-switch can move it to CONSERVATIVE or DEGEN).
-  const { user: systemUser, subWallet: vaultSubWallet } =
-    await ensureSystemVaultSubWallet(vaultAddress, vaultPrivyWalletId)
-  const activeTier = vaultSubWallet.riskTier
+  const subWallets = vaultUser.subWallets
+  const tierCount = subWallets.length
 
-  const deposit = await db.deposit.create({
-    data: {
-      userId: systemUser.id,
-      riskTier: activeTier,
-      amountSol: totalSol,
-      feeSol: 0,
-      status: 'CONFIRMED',
-      confirmedAt: new Date(),
-    },
-  })
+  // Read actual post-claim balance on the primary wallet. Fee claims
+  // may have under-filled (partial claims) and we don't want to
+  // over-promise. Reserve gas on the primary wallet.
+  let availableLamports: bigint
+  try {
+    const balance = await getNativeSolBalance(vaultAddress)
+    const balanceLamports = BigInt(Math.floor(balance * LAMPORTS_PER_SOL))
+    const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
+    availableLamports = balanceLamports > reserveLamports
+      ? balanceLamports - reserveLamports
+      : 0n
+  } catch (err) {
+    logger.error(`[fee-claim] Failed to read vault balance: ${err}`)
+    return
+  }
+
+  if (availableLamports <= 0n) {
+    logger.info('[fee-claim] Post-claim balance too low after reserve — skipping distribution')
+    return
+  }
+
+  const perTierLamports = availableLamports / BigInt(tierCount)
+  if (perTierLamports <= 0n) return
+
+  logger.info(
+    `[fee-claim] Distributing ${(Number(availableLamports) / LAMPORTS_PER_SOL).toFixed(6)} SOL across ${tierCount} tier(s) (${(Number(perTierLamports) / LAMPORTS_PER_SOL).toFixed(6)} each)`,
+  )
+
+  // 4. Transfer + enqueue deposit per tier
+  // The primary vault wallet (fee-claim address) might be one of the
+  // tier sub-wallets. For that wallet, skip the SOL transfer — it
+  // already holds its share. For the others, transfer from primary.
+  for (const sw of subWallets) {
+    const tier = sw.riskTier
+    const perTierSol = Number(perTierLamports) / LAMPORTS_PER_SOL
+
+    // If this sub-wallet IS the primary fee-claim wallet, no transfer needed.
+    // If it's a different wallet, send its share over.
+    if (sw.address !== vaultAddress) {
+      try {
+        const sig = await transferSolFromServerWallet({
+          fromPrivyWalletId: vaultPrivyWalletId,
+          fromAddress: vaultAddress,
+          toAddress: sw.address,
+          lamports: perTierLamports,
+        })
+        logger.info(
+          `[fee-claim] Transferred ${perTierSol.toFixed(6)} SOL to ${tier} sub-wallet ${sw.address.slice(0, 8)}: ${sig}`,
+        )
+      } catch (err) {
+        logger.error(`[fee-claim] Transfer to ${tier} sub-wallet failed: ${err}`)
+        continue // Skip this tier's deposit — don't create a phantom deposit
+      }
+    }
+
+    // Create deposit + enqueue allocation
+    const deposit = await db.deposit.create({
+      data: {
+        userId: vaultUser.id,
+        riskTier: tier,
+        amountSol: perTierSol,
+        feeSol: 0,
+        status: 'CONFIRMED',
+        confirmedAt: new Date(),
+      },
+    })
+
+    await depositQueue.add('allocate', {
+      depositId: deposit.id,
+      userId: vaultUser.id,
+    })
+
+    logger.info(
+      `[fee-claim] Enqueued ${tier} allocation: ${perTierSol.toFixed(6)} SOL (deposit ${deposit.id})`,
+    )
+  }
 
   await db.auditLog.create({
     data: {
       action: 'VAULT_FEE_CLAIM',
-      resource: `deposit:${deposit.id}`,
+      resource: `user:${vaultUser.id}`,
       metadata: {
         positions: withFees.length,
         lamportsClaimed: totalLamportsClaimed.toString(),
-        sol: totalSol,
-        riskTier: activeTier,
+        distributed: tierCount,
+        perTierSol: Number(perTierLamports) / LAMPORTS_PER_SOL,
       },
     },
   })
 
-  await depositQueue.add('allocate', {
-    depositId: deposit.id,
-    userId: systemUser.id,
-  })
-
   logger.info(
-    `[fee-claim] Claimed ${totalSol.toFixed(6)} SOL across ${withFees.length} position(s); enqueued ${activeTier} allocation (deposit ${deposit.id})`,
+    `[fee-claim] Done: claimed from ${withFees.length} position(s), distributed to ${tierCount} tier(s)`,
   )
 }
 

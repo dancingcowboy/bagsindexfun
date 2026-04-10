@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 import { blacklistTokenSchema, RISK_TIERS, TWEET_PLAN, type RiskTier } from '@bags-index/shared'
+import { createSolanaServerWallet } from '@bags-index/solana'
 import { requireAdmin } from '../middleware/auth.js'
-import { scoringQueue, rebalanceQueue, priceSnapshotQueue, vaultSwitchQueue } from '../queue/queues.js'
+import { scoringQueue, rebalanceQueue, priceSnapshotQueue } from '../queue/queues.js'
 
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
@@ -526,46 +527,6 @@ export async function adminRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to reconcile vault')
-      return reply.status(500).send({ error: 'Internal server error' })
-    }
-  })
-
-  /**
-   * POST /admin/vault/switch — switch the protocol vault to a different tier.
-   * Body: { toTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN' }
-   * Enqueues a vault-switch job that smart-delta-rebalances the vault sub-wallet
-   * in place and flips its riskTier label so future fee-claim deposits land in
-   * the new tier.
-   */
-  app.post<{ Body: { toTier?: string } }>('/vault/switch', async (req, reply) => {
-    try {
-      const toTier = req.body?.toTier as RiskTier | undefined
-      if (!toTier || !RISK_TIERS.includes(toTier)) {
-        return reply.status(400).send({ error: 'Invalid toTier' })
-      }
-      const user = await db.user.findUnique({
-        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
-        include: { subWallets: true },
-      })
-      if (!user || user.subWallets.length === 0) {
-        return reply.status(404).send({ error: 'Protocol vault not initialized' })
-      }
-      const vault = user.subWallets[0]
-      if (vault.riskTier === toTier) {
-        return reply.status(409).send({ error: `Vault already on ${toTier}` })
-      }
-      const job = await vaultSwitchQueue.add('vault-switch', { toTier })
-      await db.auditLog.create({
-        data: {
-          action: 'VAULT_SWITCH_REQUESTED',
-          resource: `vault:${vault.id}`,
-          metadata: { fromTier: vault.riskTier, toTier, jobId: job.id },
-          userId: req.authUser?.userId,
-        },
-      })
-      return { success: true, data: { jobId: job.id, fromTier: vault.riskTier, toTier } }
-    } catch (err) {
-      app.log.error(err, 'Failed to enqueue vault switch')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })
@@ -1197,6 +1158,71 @@ export async function adminRoutes(app: FastifyInstance) {
       return { success: true, data: entries }
     } catch (err) {
       app.log.error(err, 'Failed to load blacklist')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/vault-expand
+   * One-time: ensure the protocol vault has 3 sub-wallets (one per tier).
+   * Creates new Privy server wallets for any missing tiers. Idempotent —
+   * safe to call multiple times. The existing single sub-wallet keeps its
+   * current tier; new wallets are created for the remaining two.
+   */
+  app.post('/vault-expand', async (_req, reply) => {
+    try {
+      let user = await db.user.findUnique({
+        where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
+        include: { subWallets: true },
+      })
+      if (!user) {
+        return reply.status(404).send({ error: 'Protocol vault user not found' })
+      }
+
+      const existingTiers = new Set(user.subWallets.map((w) => w.riskTier))
+      const allTiers: RiskTier[] = ['CONSERVATIVE', 'BALANCED', 'DEGEN']
+      const created: Array<{ tier: string; address: string }> = []
+
+      for (const tier of allTiers) {
+        if (existingTiers.has(tier)) continue
+        const wallet = await createSolanaServerWallet()
+        const sub = await db.subWallet.create({
+          data: {
+            userId: user.id,
+            privyWalletId: wallet.walletId,
+            address: wallet.address,
+            riskTier: tier,
+          },
+        })
+        created.push({ tier, address: sub.address })
+        app.log.info({ tier, address: sub.address }, '[vault-expand] Created sub-wallet')
+      }
+
+      if (created.length > 0) {
+        await db.auditLog.create({
+          data: {
+            action: 'VAULT_EXPAND',
+            resource: `user:${user.id}`,
+            metadata: { created },
+          },
+        })
+      }
+
+      // Return all sub-wallets
+      const final = await db.subWallet.findMany({
+        where: { userId: user.id },
+        select: { id: true, riskTier: true, address: true },
+      })
+
+      return {
+        success: true,
+        data: {
+          created: created.length,
+          subWallets: final,
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to expand vault')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })

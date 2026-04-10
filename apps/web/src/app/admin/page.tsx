@@ -737,40 +737,32 @@ export default function AdminPage() {
                   subtitle="Top-10 token prices + weighted index line · switch tiers to compare before flipping vault"
                 />
 
-                <Panel title="Switch Vault Tier">
+                <Panel title="Vault Sub-Wallets">
                   <div className="flex flex-wrap items-center gap-3 p-4">
                     <span className="text-xs text-[var(--color-text-muted)]">
-                      Current: <strong>{vault.data.data.subWallets[0]?.riskTier ?? '—'}</strong>
+                      {vault.data.data.subWallets?.length ?? 0} sub-wallet(s):
+                      {(vault.data.data.subWallets ?? []).map((sw: any) => ` ${sw.riskTier}`).join(',')}
                     </span>
-                    {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((t) => {
-                      const current = vault.data?.data?.subWallets[0]?.riskTier
-                      const disabled = current === t
-                      return (
-                        <button
-                          key={t}
-                          disabled={disabled}
-                          onClick={async () => {
-                            if (!confirm(`Switch protocol vault → ${t}? This rebalances all vault holdings.`)) return
-                            try {
-                              const res = await fetch(`${API_BASE}/admin/vault/switch`, {
-                                method: 'POST',
-                                credentials: 'include',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ toTier: t }),
-                              })
-                              if (!res.ok) throw new Error(`${res.status}`)
-                              alert(`Vault switch to ${t} enqueued`)
-                              vault.refetch()
-                            } catch (e: any) {
-                              alert(`Failed: ${e?.message ?? e}`)
-                            }
-                          }}
-                          className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase disabled:opacity-30"
-                        >
-                          {t}
-                        </button>
-                      )
-                    })}
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Create missing tier sub-wallets for the protocol vault?')) return
+                        try {
+                          const res = await fetch(`${API_BASE}/admin/vault-expand`, {
+                            method: 'POST',
+                            credentials: 'include',
+                          })
+                          const data = await res.json()
+                          if (!res.ok) throw new Error(data.error ?? `${res.status}`)
+                          alert(`Created ${data.data.created} new sub-wallet(s)`)
+                          vault.refetch()
+                        } catch (e: any) {
+                          alert(`Failed: ${e?.message ?? e}`)
+                        }
+                      }}
+                      className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase hover:bg-[var(--color-bg-hover)]"
+                    >
+                      Expand to 3 Tiers
+                    </button>
                   </div>
                 </Panel>
 
