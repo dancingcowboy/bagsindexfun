@@ -99,19 +99,26 @@ export async function getTokenBalances(walletAddress: string) {
  */
 export async function sendJitoProtected(signedTxBase64: string): Promise<string> {
   const apiKey = getApiKey()
-  const res = await axios.post(
-    `https://sender.helius-rpc.com/fast?api-key=${apiKey}`,
-    {
-      jsonrpc: '2.0',
-      id: 'bags-index-send',
-      method: 'sendTransaction',
-      params: [
-        signedTxBase64,
-        { encoding: 'base64', skipPreflight: true, maxRetries: 0 },
-      ],
-    },
-    { timeout: 20_000 }
-  )
+  let res: any
+  try {
+    res = await axios.post(
+      `https://sender.helius-rpc.com/fast?api-key=${apiKey}`,
+      {
+        jsonrpc: '2.0',
+        id: 'bags-index-send',
+        method: 'sendTransaction',
+        params: [
+          signedTxBase64,
+          { encoding: 'base64', skipPreflight: true, maxRetries: 0 },
+        ],
+      },
+      { timeout: 20_000 }
+    )
+  } catch (err: any) {
+    const body = err?.response?.data
+    console.error(`[helius] Sender HTTP ${err?.response?.status}: ${JSON.stringify(body)?.slice(0, 500)}`)
+    throw err
+  }
   if (res.data.error) {
     throw new Error(`Helius sender error: ${res.data.error.message || JSON.stringify(res.data.error)}`)
   }
