@@ -593,7 +593,25 @@ export default function DashboardPage() {
                               style={{ borderColor: c.border }}
                             >
                               <td className="px-5 py-3 text-sm">
-                                <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold">{h.tokenSymbol ?? '—'}</span>
+                                  <a
+                                    href={`https://dexscreener.com/solana/${h.tokenMint}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                                  >
+                                    dex
+                                  </a>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(h.tokenMint) }}
+                                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                                    title="Copy contract address"
+                                  >
+                                    ca
+                                  </button>
+                                </div>
                                 <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
                                   {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
                                 </div>
@@ -721,7 +739,28 @@ export default function DashboardPage() {
                         {t.rank}
                       </td>
                       <td className="px-6 py-3 font-medium text-sm">
-                        {t.tokenSymbol}
+                        <div className="flex items-center gap-2">
+                          <span>{t.tokenSymbol}</span>
+                          {t.tokenMint !== 'SOL' && (
+                            <>
+                              <a
+                                href={`https://dexscreener.com/solana/${t.tokenMint}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                              >
+                                dex
+                              </a>
+                              <button
+                                onClick={() => navigator.clipboard.writeText(t.tokenMint)}
+                                className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                                title="Copy contract address"
+                              >
+                                ca
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
                         {t.marketCapUsd > 0 ? `$${(t.marketCapUsd >= 1_000_000 ? (t.marketCapUsd / 1_000_000).toFixed(1) + 'M' : t.marketCapUsd >= 1_000 ? (t.marketCapUsd / 1_000).toFixed(0) + 'K' : t.marketCapUsd.toFixed(0))}` : '—'}

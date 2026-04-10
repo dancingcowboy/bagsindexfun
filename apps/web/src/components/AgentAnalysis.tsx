@@ -429,6 +429,22 @@ export function AgentAnalysis() {
                             </span>
                           )
                         })()}
+                        <a
+                          href={`https://dexscreener.com/solana/${alloc.tokenMint}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                        >
+                          dex
+                        </a>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(alloc.tokenMint) }}
+                          className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                          title="Copy contract address"
+                        >
+                          ca
+                        </button>
                       </div>
                     </div>
 
