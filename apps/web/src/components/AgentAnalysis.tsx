@@ -434,24 +434,22 @@ export function AgentAnalysis() {
                         <span className="font-semibold text-sm">
                           {alloc.tokenSymbol}
                         </span>
-                        <span className="text-xs text-[var(--color-text-muted)]">
+                        <span className="text-xs text-[var(--color-text-muted)] hidden sm:inline">
                           {alloc.tokenName}
                         </span>
-                        {(() => {
-                          const mc = (alloc as any).marketCapUsd
-                          if (!mc || mc <= 0) return null
-                          const label = mc >= 1_000_000
-                            ? `$${(mc / 1_000_000).toFixed(1)}M`
-                            : mc >= 1_000
-                              ? `$${(mc / 1_000).toFixed(0)}K`
-                              : `$${mc.toFixed(0)}`
-                          return (
-                            <span className="text-[10px] font-[family-name:var(--font-mono)] text-[var(--color-text-muted)]">
-                              {label}
-                            </span>
-                          )
-                        })()}
                       </div>
+                    </div>
+
+                    <div className="w-16 text-right font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                      {(() => {
+                        const mc = (alloc as any).marketCapUsd
+                        if (!mc || mc <= 0) return '—'
+                        return mc >= 1_000_000
+                          ? `$${(mc / 1_000_000).toFixed(1)}M`
+                          : mc >= 1_000
+                            ? `$${(mc / 1_000).toFixed(0)}K`
+                            : `$${mc.toFixed(0)}`
+                      })()}
                     </div>
 
                     <div className="hidden sm:flex items-center gap-1.5">
