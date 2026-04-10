@@ -68,9 +68,9 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
     const decimals = t.decimals
     const whole = Number(amountBig) / 10 ** decimals
 
-    // Bags: quote ONE whole token → lamports, multiply by amount. If Bags
-    // has no route OR is rate-limited, fall through to Jupiter v6 which
-    // aggregates every Solana DEX and has strictly better coverage.
+    // Price cascade: Bags → DexScreener → Jupiter (batch) → Jupiter (quote).
+    // DexScreener is free with no meaningful rate limit, so we try it before
+    // Jupiter to avoid burning Jupiter API quota on pricing.
     let priceSol = 0
     let source: LiveHolding['source'] = 'none'
     try {
@@ -79,17 +79,12 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
       if (lamports !== null) {
         priceSol = Number(lamports) / LAMPORTS_PER_SOL
         source = 'bags'
-      } else {
-        const jLamports = await getJupiterSolValue(t.mint, probe)
-        if (jLamports !== null) {
-          priceSol = Number(jLamports) / LAMPORTS_PER_SOL
-          source = 'jupiter'
-        }
       }
     } catch {
       // fall through
     }
 
+    // DexScreener USD → SOL (already batch-fetched, no extra request)
     if (priceSol === 0 && solUsd > 0) {
       const usd = Number(dexPrices.get(t.mint)?.priceUsd ?? 0)
       if (usd > 0) {
@@ -98,11 +93,26 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
       }
     }
 
+    // Jupiter batch price (already fetched, no extra request)
     if (priceSol === 0 && solUsd > 0) {
       const usd = Number(jupPrices.get(t.mint)?.usdPrice ?? 0)
       if (usd > 0) {
         priceSol = usd / solUsd
         source = 'jupiter'
+      }
+    }
+
+    // Last resort: per-token Jupiter quote (costs 1 API request each)
+    if (priceSol === 0) {
+      try {
+        const probe = (10n ** BigInt(decimals)).toString()
+        const jLamports = await getJupiterSolValue(t.mint, probe)
+        if (jLamports !== null) {
+          priceSol = Number(jLamports) / LAMPORTS_PER_SOL
+          source = 'jupiter'
+        }
+      } catch {
+        // fall through
       }
     }
 

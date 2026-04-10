@@ -5,6 +5,7 @@ export interface DexVolume {
   priceUsd: number
   liquidityUsd: number
   marketCapUsd: number
+  pairCreatedAt: number | null // epoch ms
 }
 
 /**
@@ -41,6 +42,7 @@ export async function getDexVolumes(
           priceUsd: Number(p?.priceUsd) || 0,
           liquidityUsd: Number(p?.liquidity?.usd) || 0,
           marketCapUsd: Number(p?.marketCap) || Number(p?.fdv) || 0,
+          pairCreatedAt: p?.pairCreatedAt ? Number(p.pairCreatedAt) : null,
         })
       }
     } catch (err) {

@@ -2,7 +2,6 @@ import { Worker, type Job, Queue } from 'bullmq'
 import { db } from '@bags-index/db'
 import {
   getBagsPools,
-  getJupiterPrices,
   getDexVolumes,
   getHolderCount,
   getTokenMetadataBatch,
@@ -66,22 +65,22 @@ async function processScoring(job: Job<ScoringJobData>) {
     logger.info(`[scoring] ${pools.length} migrated pools on Bags`)
     const allMints = pools.map((p) => p.tokenMint)
 
-    // Stage 1+2: prefilter via Jupiter Price API (free, batched, returns price
-    // + confidence + depth in one shot). Drops dead/illiquid/low-confidence.
-    const prices = await getJupiterPrices(allMints)
+    // Stage 1+2: prefilter via DexScreener (free, no rate limit concerns).
+    // Drops tokens with no price or below the liquidity floor.
+    const dexAll = await getDexVolumes(allMints)
     const MIN_LIQ_USD = 5000
     const survivors = allMints.filter((mint) => {
-      const info = prices.get(mint)
-      if (!info || !(info.usdPrice > 0)) return false
-      if (!(info.liquidity >= MIN_LIQ_USD)) return false
+      const info = dexAll.get(mint)
+      if (!info || !(info.priceUsd > 0)) return false
+      if (!(info.liquidityUsd >= MIN_LIQ_USD)) return false
       return true
     })
     logger.info(
-      `[scoring] prefilter: ${survivors.length}/${allMints.length} survived Jupiter price+depth`
+      `[scoring] prefilter: ${survivors.length}/${allMints.length} survived DexScreener price+liquidity`
     )
 
-    // Stage 2.5: DexScreener for real 24h volume (free, batched ≤30/call)
-    const volumes = await getDexVolumes(survivors)
+    // DexScreener data already contains volume — reuse it.
+    const volumes = dexAll
     logger.info(`[scoring] dexscreener: ${volumes.size} volume rows`)
 
     // Stage 3: Helius DAS metadata batch (≤1000 mints/call)
@@ -132,16 +131,15 @@ async function processScoring(job: Job<ScoringJobData>) {
         const holderGrowthPct =
           prevHolders > 0 ? ((holderCount - prevHolders) / prevHolders) * 100 : 0
 
-        const info = prices.get(token.tokenMint)
         const vol = volumes.get(token.tokenMint)
-        const priceUsd = vol?.priceUsd || info?.usdPrice || 0
-        const liquidityUsd = vol?.liquidityUsd || info?.liquidity || 0
+        const priceUsd = vol?.priceUsd || 0
+        const liquidityUsd = vol?.liquidityUsd || 0
         const volume24h = vol?.volumeH24Usd || 0
         const marketCapUsd = vol?.marketCapUsd || 0
-        const ageDays = info?.createdAt
+        const ageDays = vol?.pairCreatedAt
           ? Math.max(
               0,
-              Math.floor((Date.now() - new Date(info.createdAt).getTime()) / 86_400_000)
+              Math.floor((Date.now() - vol.pairCreatedAt) / 86_400_000)
             )
           : 0
         raw.push({
@@ -437,13 +435,13 @@ async function processSingleTier(
     // 1. Universe fetch (same pipeline as legacy path)
     const pools = await getBagsPools(true)
     const allMints = pools.map((p) => p.tokenMint)
-    const prices = await getJupiterPrices(allMints)
+    const dexAll = await getDexVolumes(allMints)
     const MIN_LIQ_USD = 5000
     const survivors = allMints.filter((mint) => {
-      const info = prices.get(mint)
-      return !!info && info.usdPrice > 0 && info.liquidity >= MIN_LIQ_USD
+      const info = dexAll.get(mint)
+      return !!info && info.priceUsd > 0 && info.liquidityUsd >= MIN_LIQ_USD
     })
-    const volumes = await getDexVolumes(survivors)
+    const volumes = dexAll
     const metadata = new Map<string, { symbol: string; name: string }>()
     for (let i = 0; i < survivors.length; i += 1000) {
       try {
@@ -517,16 +515,15 @@ async function processSingleTier(
         const prevHolders = prevHolderMap.get(token.tokenMint) ?? holderCount
         const holderGrowthPct =
           prevHolders > 0 ? ((holderCount - prevHolders) / prevHolders) * 100 : 0
-        const info = prices.get(token.tokenMint)
         const vol = volumes.get(token.tokenMint)
-        const priceUsd = vol?.priceUsd || info?.usdPrice || 0
-        const liquidityUsd = vol?.liquidityUsd || info?.liquidity || 0
+        const priceUsd = vol?.priceUsd || 0
+        const liquidityUsd = vol?.liquidityUsd || 0
         const volume24h = vol?.volumeH24Usd || 0
         const marketCapUsd = vol?.marketCapUsd || 0
-        const ageDays = info?.createdAt
+        const ageDays = vol?.pairCreatedAt
           ? Math.max(
               0,
-              Math.floor((Date.now() - new Date(info.createdAt).getTime()) / 86_400_000),
+              Math.floor((Date.now() - vol.pairCreatedAt) / 86_400_000),
             )
           : 0
         raw.push({
