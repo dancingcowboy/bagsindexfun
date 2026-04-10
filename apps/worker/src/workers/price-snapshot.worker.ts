@@ -180,6 +180,29 @@ export async function processSnapshot(_job?: Job) {
       logger.info(
         `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} dex=${dexHits} jup=${jupHits})`,
       )
+
+      // Refresh marketCapUsd on the latest TokenScore for each mint so
+      // the dashboard/landing page always show current MC — not just
+      // the value captured at scoring time.
+      let mcUpdates = 0
+      for (const [mint, dex] of dexPrices) {
+        if (dex.marketCapUsd <= 0) continue
+        const latest = await db.tokenScore.findFirst({
+          where: { tokenMint: mint },
+          orderBy: { scoredAt: 'desc' },
+          select: { id: true, marketCapUsd: true },
+        })
+        if (!latest) continue
+        if (Number(latest.marketCapUsd) === dex.marketCapUsd) continue
+        await db.tokenScore.update({
+          where: { id: latest.id },
+          data: { marketCapUsd: dex.marketCapUsd },
+        })
+        mcUpdates++
+      }
+      if (mcUpdates > 0) {
+        logger.info(`[price-snapshot] refreshed marketCapUsd on ${mcUpdates} token scores`)
+      }
     }
   } catch (err) {
     logger.error(`[price-snapshot] per-token sampling failed: ${err}`)
