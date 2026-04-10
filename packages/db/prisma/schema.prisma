@@ -217,6 +217,7 @@ model TokenScore {
   holderGrowthPct Decimal      @map("holder_growth_pct") @db.Decimal(10, 4)
   priceUsd        Decimal      @map("price_usd") @db.Decimal(20, 8)
   liquidityUsd    Decimal      @map("liquidity_usd") @db.Decimal(20, 2)
+  marketCapUsd    Decimal      @default(0) @map("market_cap_usd") @db.Decimal(20, 2)
   compositeScore  Decimal      @map("composite_score") @db.Decimal(10, 4)
   rank            Int
   isBlacklisted   Boolean      @default(false) @map("is_blacklisted")

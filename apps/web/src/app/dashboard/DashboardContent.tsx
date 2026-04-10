@@ -579,6 +579,7 @@ export default function DashboardPage() {
                         <thead>
                           <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
                             <th className="px-5 py-2 text-left font-medium">Token</th>
+                            <th className="px-5 py-2 text-right font-medium">MC</th>
                             <th className="px-5 py-2 text-right font-medium">Amount</th>
                             <th className="px-5 py-2 text-right font-medium">Value (SOL)</th>
                             <th className="px-5 py-2 text-right font-medium">Allocation</th>
@@ -596,6 +597,9 @@ export default function DashboardPage() {
                                 <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
                                   {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
                                 </div>
+                              </td>
+                              <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                                {h.marketCapUsd > 0 ? `$${(h.marketCapUsd >= 1_000_000 ? (h.marketCapUsd / 1_000_000).toFixed(1) + 'M' : h.marketCapUsd >= 1_000 ? (h.marketCapUsd / 1_000).toFixed(0) + 'K' : h.marketCapUsd.toFixed(0))}` : '—'}
                               </td>
                               <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
                                 {Number(h.amount).toLocaleString()}

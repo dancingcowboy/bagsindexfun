@@ -104,6 +104,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         holderGrowthPct: Number(s.holderGrowthPct),
         priceUsd: Number(s.priceUsd),
         liquidityUsd: Number(s.liquidityUsd),
+        marketCapUsd: Number(s.marketCapUsd),
         compositeScore: Number(s.compositeScore),
         rank: s.rank,
         weightPct:

@@ -30,6 +30,7 @@ interface RawToken {
   holderGrowthPct: number
   priceUsd: number
   liquidityUsd: number
+  marketCapUsd: number
   ageDays: number
 }
 
@@ -136,13 +137,13 @@ async function processScoring(job: Job<ScoringJobData>) {
         const priceUsd = vol?.priceUsd || info?.usdPrice || 0
         const liquidityUsd = vol?.liquidityUsd || info?.liquidity || 0
         const volume24h = vol?.volumeH24Usd || 0
+        const marketCapUsd = vol?.marketCapUsd || 0
         const ageDays = info?.createdAt
           ? Math.max(
               0,
               Math.floor((Date.now() - new Date(info.createdAt).getTime()) / 86_400_000)
             )
           : 0
-        // TODO: pull true 24h volume from a dedicated source
         raw.push({
           tokenMint: token.tokenMint,
           tokenSymbol: token.symbol,
@@ -152,6 +153,7 @@ async function processScoring(job: Job<ScoringJobData>) {
           holderGrowthPct,
           priceUsd,
           liquidityUsd,
+          marketCapUsd,
           ageDays,
         })
       } catch (err) {
@@ -342,6 +344,7 @@ async function processScoring(job: Job<ScoringJobData>) {
             holderGrowthPct: t.holderGrowthPct,
             priceUsd: t.priceUsd,
             liquidityUsd: t.liquidityUsd,
+            marketCapUsd: t.marketCapUsd,
             compositeScore: t.compositeScore,
             rank: i + 1,
             safetyVerdict: r.verdict,
@@ -367,6 +370,7 @@ async function processScoring(job: Job<ScoringJobData>) {
             holderGrowthPct: t.holderGrowthPct,
             priceUsd: t.priceUsd,
             liquidityUsd: t.liquidityUsd,
+            marketCapUsd: t.marketCapUsd,
             compositeScore: t.compositeScore,
             rank: 0,
             isBlacklisted: true,
@@ -518,6 +522,7 @@ async function processSingleTier(
         const priceUsd = vol?.priceUsd || info?.usdPrice || 0
         const liquidityUsd = vol?.liquidityUsd || info?.liquidity || 0
         const volume24h = vol?.volumeH24Usd || 0
+        const marketCapUsd = vol?.marketCapUsd || 0
         const ageDays = info?.createdAt
           ? Math.max(
               0,
@@ -533,6 +538,7 @@ async function processSingleTier(
           holderGrowthPct,
           priceUsd,
           liquidityUsd,
+          marketCapUsd,
           ageDays,
         })
       } catch (err) {
@@ -654,6 +660,7 @@ async function processSingleTier(
           holderGrowthPct: t.holderGrowthPct,
           priceUsd: t.priceUsd,
           liquidityUsd: t.liquidityUsd,
+          marketCapUsd: t.marketCapUsd,
           compositeScore: t.compositeScore,
           rank: i + 1,
           safetyVerdict: r.verdict,
@@ -678,6 +685,7 @@ async function processSingleTier(
           holderGrowthPct: t.holderGrowthPct,
           priceUsd: t.priceUsd,
           liquidityUsd: t.liquidityUsd,
+          marketCapUsd: t.marketCapUsd,
           compositeScore: t.compositeScore,
           rank: 0,
           isBlacklisted: true,

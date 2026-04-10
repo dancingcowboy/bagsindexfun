@@ -62,25 +62,29 @@ export async function portfolioRoutes(app: FastifyInstance) {
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: [...mints] } },
             orderBy: { scoredAt: 'desc' },
-            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+            select: { tokenMint: true, tokenSymbol: true, tokenName: true, marketCapUsd: true },
           })
         : []
-      const metaByMint = new Map<string, { symbol: string | null; name: string | null }>()
+      const metaByMint = new Map<string, { symbol: string | null; name: string | null; marketCapUsd: number }>()
       for (const s of scores) {
         if (!metaByMint.has(s.tokenMint))
-          metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+          metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName, marketCapUsd: Number(s.marketCapUsd) })
       }
 
       const tiers = wallets.map((w) => {
         const live = liveByAddress.get(w.address)
         if (live) {
           const tokenValueSol = live.holdings.reduce((s, h) => s + h.valueSol, 0)
-          const totalValueSol = tokenValueSol + live.nativeSol
+          // Only include native SOL when the wallet holds tokens — the gas
+          // reserve in an empty wallet is not user value.
+          const totalValueSol = live.holdings.length > 0
+            ? tokenValueSol + live.nativeSol
+            : 0
           return {
             riskTier: w.riskTier,
             walletAddress: w.address,
             totalValueSol: totalValueSol.toFixed(9),
-            nativeSol: live.nativeSol.toFixed(9),
+            nativeSol: live.holdings.length > 0 ? live.nativeSol.toFixed(9) : '0',
             holdings: live.holdings.map((h) => {
               const meta = metaByMint.get(h.tokenMint)
               return {
@@ -90,6 +94,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
                 amount: h.amount,
                 valueSol: h.valueSol.toFixed(9),
                 priceSource: h.source,
+                marketCapUsd: meta?.marketCapUsd ?? 0,
                 allocationPct:
                   tokenValueSol > 0
                     ? ((h.valueSol / tokenValueSol) * 100).toFixed(2)
@@ -114,6 +119,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
               tokenName: meta?.name ?? null,
               amount: h.amount.toString(),
               valueSol: Number(h.valueSolEst).toFixed(9),
+              marketCapUsd: meta?.marketCapUsd ?? 0,
               allocationPct:
                 tokenValueSol > 0
                   ? ((Number(h.valueSolEst) / tokenValueSol) * 100).toFixed(2)
@@ -309,9 +315,14 @@ export async function portfolioRoutes(app: FastifyInstance) {
       }
 
       const tiers = wallets.map((w) => {
-        const currentValue =
-          liveByWallet.get(w.id) ??
-          w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
+        // When a wallet has zero holdings, its value is 0 — any remaining
+        // native SOL is a gas reserve, not user value. Only count the live
+        // balance when the wallet actually holds tokens.
+        const hasHoldings = w.holdings.length > 0
+        const currentValue = hasHoldings
+          ? (liveByWallet.get(w.id) ??
+             w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0))
+          : 0
         const costBasis = netDepositedByTier.get(w.riskTier) ?? 0
         const realized = Number(w.realizedPnlSol)
         const unrealized = currentValue - costBasis
