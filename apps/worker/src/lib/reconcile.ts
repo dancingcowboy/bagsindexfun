@@ -4,14 +4,26 @@ import { getTokenBalances } from '@bags-index/solana'
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
 
 /**
+ * How long after a holding's last update we wait before allowing deletion.
+ * Helius /balances can lag a few seconds after a swap — this grace period
+ * prevents wiping freshly-bought holdings that the indexer hasn't caught up
+ * with yet (see deposit cmns3akcr 2026-04-09).
+ */
+const DELETE_GRACE_MS = 2 * 60_000 // 2 minutes
+
+/**
  * Reconcile a sub-wallet's DB Holding rows against actual on-chain SPL
  * balances. Preserves cost basis and realized PnL — only `amount` is
  * rewritten — and inserts/deletes rows so the row set matches what the
  * wallet actually holds.
  *
- * Called from every swap worker (deposit/withdrawal/rebalance/switch/
- * vault-switch) immediately after the swap batch finishes, so the DB
- * never silently drifts from chain state.
+ * Holdings absent from chain are deleted ONLY if their last update is
+ * older than DELETE_GRACE_MS, protecting against Helius indexer lag on
+ * fresh buys while still cleaning up post-withdrawal ghost rows.
+ *
+ * Called from every swap worker (deposit/withdrawal/rebalance/switch)
+ * immediately after the swap batch finishes, so the DB never silently
+ * drifts from chain state.
  */
 export async function reconcileSubWalletHoldings(
   subWalletId: string,
@@ -34,23 +46,29 @@ export async function reconcileSubWalletHoldings(
   const dbByMint = new Map(holdings.map((h) => [h.tokenMint, h]))
 
   let updated = 0
-  const deleted = 0
+  let deleted = 0
   let inserted = 0
 
-  // Additive only: update amounts when on-chain reports a different value,
-  // insert missing mints. Never delete based on "not in on-chain" — the
-  // Helius /balances endpoint lags the chain by a few seconds after a swap,
-  // and wiping a freshly-bought holding because the indexer hasn't caught up
-  // yet has cost us real portfolios (see deposit cmns3akcr 2026-04-09).
-  // Sales to zero are handled explicitly in the swap/rebalance workers.
+  const now = Date.now()
+
   for (const h of holdings) {
     const onChainAmt = onChain.get(h.tokenMint)
-    if (onChainAmt !== undefined && onChainAmt !== h.amount) {
-      await db.holding.update({
-        where: { id: h.id },
-        data: { amount: onChainAmt },
-      })
-      updated++
+    if (onChainAmt !== undefined) {
+      // Token exists on-chain — update amount if different
+      if (onChainAmt !== h.amount) {
+        await db.holding.update({
+          where: { id: h.id },
+          data: { amount: onChainAmt },
+        })
+        updated++
+      }
+    } else {
+      // Token not on-chain — delete if old enough (past grace period)
+      const age = now - new Date(h.updatedAt).getTime()
+      if (age > DELETE_GRACE_MS) {
+        await db.holding.delete({ where: { id: h.id } })
+        deleted++
+      }
     }
   }
 
