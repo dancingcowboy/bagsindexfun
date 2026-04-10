@@ -17,3 +17,10 @@ export async function getNativeSolBalance(address: string): Promise<number> {
   const lamports = await conn.getBalance(new PublicKey(address))
   return lamports / LAMPORTS_PER_SOL
 }
+
+/** Native SOL balance for a wallet address, in lamports (bigint). */
+export async function getNativeSolBalanceLamports(address: string): Promise<bigint> {
+  const conn = getConnection()
+  const lamports = await conn.getBalance(new PublicKey(address))
+  return BigInt(lamports)
+}

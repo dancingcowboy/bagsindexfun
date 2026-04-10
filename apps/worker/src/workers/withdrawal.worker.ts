@@ -5,6 +5,7 @@ import {
   submitAndConfirmDirect,
   signVersionedTxBytes,
   transferSolFromServerWallet,
+  getNativeSolBalanceLamports,
 } from '@bags-index/solana'
 import {
   QUEUE_WITHDRAWAL,
@@ -143,15 +144,27 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     },
   })
 
-  // Transfer recovered SOL (minus gas reserve) to the user's connected wallet.
-  // No protocol fee — vault value is 100% the user's. Gas reserve stays so
-  // the wallet can pay future tx fees.
+  // Transfer recovered SOL to the user's connected wallet.
+  // For full liquidations with no failures the wallet is empty — send
+  // the entire on-chain SOL balance (minus a minimal tx fee). For partial
+  // withdrawals keep a gas reserve so the wallet can pay future tx fees.
   let transferSig: string | null = null
   try {
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user) throw new Error(`User ${userId} not found`)
-    const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
-    const sendable = totalRecoveredLamports - reserveLamports
+    const walletFullyEmptied = !isPartial && failedTokens === 0
+    let sendable: bigint
+    if (walletFullyEmptied) {
+      // Read the actual on-chain balance so we sweep everything (sells may
+      // have returned more than the quote predicted, and there may be
+      // pre-existing SOL in the wallet from earlier partial withdrawals).
+      const balanceLamports = await getNativeSolBalanceLamports(subWallet.address)
+      const TX_FEE = 10_000n
+      sendable = balanceLamports - TX_FEE
+    } else {
+      const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
+      sendable = totalRecoveredLamports - reserveLamports
+    }
     if (sendable > 0n) {
       transferSig = await transferSolFromServerWallet({
         fromPrivyWalletId: subWallet.privyWalletId,

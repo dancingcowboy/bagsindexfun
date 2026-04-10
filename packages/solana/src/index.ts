@@ -1,4 +1,4 @@
-export { getConnection, getNativeSolBalance } from './connection.js'
+export { getConnection, getNativeSolBalance, getNativeSolBalanceLamports } from './connection.js'
 export {
   getTokenFeed,
   getTradeQuote,
