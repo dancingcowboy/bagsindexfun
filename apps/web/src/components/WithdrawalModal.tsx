@@ -21,14 +21,15 @@ interface Props {
   onClose: () => void
   tiers: TierInfo[]
   onWithdrawn: () => void
+  onProgress?: (withdrawalId: string, tier: string) => void
 }
 
-export function WithdrawalModal({ open, onClose, tiers, onWithdrawn }: Props) {
+export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress }: Props) {
   // Per-tier percentage selections
   const [pcts, setPcts] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
-  const [results, setResults] = useState<Array<{ tier: string; ok: boolean; msg: string }>>([])
+  const [results, setResults] = useState<Array<{ tier: string; ok: boolean; msg: string; id?: string }>>([])
 
   const activeTiers = tiers.filter((t) => Number(t.currentValueSol) > 0)
 
@@ -51,6 +52,7 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn }: Props) {
           tier: t.riskTier,
           ok: true,
           msg: `~${Number(res.data.netSol).toFixed(4)} SOL queued`,
+          id: res.data.id,
         })
       } catch (err: any) {
         out.push({
@@ -65,7 +67,13 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn }: Props) {
     setStatus(null)
     setBusy(false)
 
-    if (out.every((r) => r.ok)) {
+    const firstOk = out.find((r) => r.ok)
+    if (out.every((r) => r.ok) && firstOk && onProgress) {
+      // Show the live progress modal for the first withdrawal
+      setTimeout(() => {
+        onProgress(firstOk.id!, firstOk.tier)
+      }, 800)
+    } else if (out.every((r) => r.ok)) {
       setTimeout(() => {
         onWithdrawn()
       }, 1500)

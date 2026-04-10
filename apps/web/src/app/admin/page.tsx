@@ -172,7 +172,7 @@ export default function AdminPage() {
     }
   }, [privyReady, privyAuth, me.isLoading, me.isFetching, me.isError, me.data, router])
 
-  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault'>('overview')
+  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault' | 'whitelist'>('overview')
 
   const [vaultLive, setVaultLive] = useState(false)
   const vault = useQuery({
@@ -247,6 +247,54 @@ export default function AdminPage() {
     onSuccess: () => overview.refetch(),
   })
 
+  const whitelist = useQuery({
+    queryKey: ['admin-whitelist'],
+    queryFn: () => fetchJson<{ data: Array<{ id: string; walletAddress: string; maxDepositSol: string; note: string | null; addedBy: string; createdAt: string }> }>('/admin/whitelist'),
+    enabled: tab === 'whitelist',
+  })
+
+  const [wlWallet, setWlWallet] = useState('')
+  const [wlCap, setWlCap] = useState('10')
+  const [wlNote, setWlNote] = useState('')
+  const [wlEditWallet, setWlEditWallet] = useState<string | null>(null)
+  const [wlEditCap, setWlEditCap] = useState('')
+
+  const addWhitelist = useMutation({
+    mutationFn: () =>
+      fetch(`${API_BASE}/admin/whitelist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        credentials: 'include',
+        body: JSON.stringify({ walletAddress: wlWallet, maxDepositSol: Number(wlCap) || 10, note: wlNote || undefined }),
+      }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
+      setWlWallet('')
+      setWlCap('10')
+      setWlNote('')
+    },
+  })
+
+  const updateWhitelist = useMutation({
+    mutationFn: (args: { wallet: string; maxDepositSol: number }) =>
+      fetch(`${API_BASE}/admin/whitelist/${args.wallet}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        credentials: 'include',
+        body: JSON.stringify({ maxDepositSol: args.maxDepositSol }),
+      }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] })
+      setWlEditWallet(null)
+    },
+  })
+
+  const removeWhitelist = useMutation({
+    mutationFn: (wallet: string) =>
+      fetch(`${API_BASE}/admin/whitelist/${wallet}`, { method: 'DELETE', headers: authHeaders(), credentials: 'include' }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json() }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-whitelist'] }),
+  })
+
   // Hard gate: render nothing while we resolve identity OR while we're
   // bouncing a non-admin away. Non-admins never see any admin chrome.
   if (!privyReady || !privyAuth || me.isLoading || me.isFetching || !me.data?.data?.isAdmin) {
@@ -296,7 +344,7 @@ export default function AdminPage() {
       <main className="mx-auto max-w-7xl px-6 pt-24 pb-24">
         {/* Tabs */}
         <div className="mb-8 flex items-center gap-2 border-b border-[var(--color-border)]">
-          {(['overview', 'users', 'pnl', 'audit', 'campaign', 'vault'] as const).map((t) => (
+          {(['overview', 'users', 'pnl', 'audit', 'campaign', 'vault', 'whitelist'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -857,6 +905,132 @@ export default function AdminPage() {
                 </Panel>
               </>
             )}
+          </div>
+        )}
+
+        {tab === 'whitelist' && (
+          <div className="space-y-6">
+            {/* Add form */}
+            <Panel title="Add Wallet">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex-1 min-w-[240px]">
+                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Wallet Address</label>
+                  <input
+                    value={wlWallet}
+                    onChange={(e) => setWlWallet(e.target.value)}
+                    placeholder="HF6jdr..."
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm font-[family-name:var(--font-mono)]"
+                  />
+                </div>
+                <div className="w-28">
+                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Cap (SOL)</label>
+                  <input
+                    type="number"
+                    value={wlCap}
+                    onChange={(e) => setWlCap(e.target.value)}
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="flex-1 min-w-[160px]">
+                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">Note (optional)</label>
+                  <input
+                    value={wlNote}
+                    onChange={(e) => setWlNote(e.target.value)}
+                    placeholder="Beta tester, team, etc."
+                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm"
+                  />
+                </div>
+                <button
+                  onClick={() => addWhitelist.mutate()}
+                  disabled={addWhitelist.isPending || !wlWallet}
+                  className="btn-primary px-5 py-2 text-sm disabled:opacity-40"
+                >
+                  {addWhitelist.isPending ? 'Adding...' : 'Add'}
+                </button>
+              </div>
+            </Panel>
+
+            {/* Table */}
+            <Panel title={`Whitelisted Wallets (${whitelist.data?.data?.length ?? 0})`}>
+              {whitelist.isLoading ? (
+                <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">Loading...</div>
+              ) : !whitelist.data?.data?.length ? (
+                <div className="py-8 text-center text-sm text-[var(--color-text-muted)]">No wallets whitelisted yet.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--color-border)] text-left text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                        <th className="pb-2 pr-4">Wallet</th>
+                        <th className="pb-2 pr-4">Cap (SOL)</th>
+                        <th className="pb-2 pr-4">Note</th>
+                        <th className="pb-2 pr-4">Added</th>
+                        <th className="pb-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {whitelist.data.data.map((entry) => (
+                        <tr key={entry.id} className="border-b border-[var(--color-border-subtle)]">
+                          <td className="py-2 pr-4 font-[family-name:var(--font-mono)] text-xs">
+                            {entry.walletAddress.slice(0, 6)}...{entry.walletAddress.slice(-4)}
+                            <button
+                              onClick={() => navigator.clipboard.writeText(entry.walletAddress)}
+                              className="ml-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                              title="Copy full address"
+                            >
+                              <svg className="inline h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                            </button>
+                          </td>
+                          <td className="py-2 pr-4">
+                            {wlEditWallet === entry.walletAddress ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  value={wlEditCap}
+                                  onChange={(e) => setWlEditCap(e.target.value)}
+                                  className="w-20 rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-0.5 text-xs"
+                                  autoFocus
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') updateWhitelist.mutate({ wallet: entry.walletAddress, maxDepositSol: Number(wlEditCap) || 10 })
+                                    if (e.key === 'Escape') setWlEditWallet(null)
+                                  }}
+                                />
+                                <button
+                                  onClick={() => updateWhitelist.mutate({ wallet: entry.walletAddress, maxDepositSol: Number(wlEditCap) || 10 })}
+                                  className="text-[10px] text-[#00D62B]"
+                                >
+                                  Save
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setWlEditWallet(entry.walletAddress); setWlEditCap(entry.maxDepositSol) }}
+                                className="hover:text-[var(--color-text-primary)] text-[var(--color-text-secondary)]"
+                                title="Click to edit"
+                              >
+                                {Number(entry.maxDepositSol).toFixed(1)}
+                              </button>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4 text-xs text-[var(--color-text-muted)]">{entry.note || '—'}</td>
+                          <td className="py-2 pr-4 text-xs text-[var(--color-text-muted)]">
+                            {new Date(entry.createdAt).toLocaleDateString()}
+                          </td>
+                          <td className="py-2">
+                            <button
+                              onClick={() => { if (confirm(`Remove ${entry.walletAddress.slice(0, 8)}... from whitelist?`)) removeWhitelist.mutate(entry.walletAddress) }}
+                              className="text-[var(--color-text-muted)] hover:text-red-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Panel>
           </div>
         )}
       </main>

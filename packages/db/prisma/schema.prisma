@@ -317,6 +317,23 @@ model SwitchJob {
 
 // ─── Admin ──────────────────────────────────────────────────────────────────
 
+/**
+ * Beta wallet whitelist. Only wallets present in this table may deposit.
+ * Each entry carries a per-user deposit cap (default 10 SOL per tier).
+ * Admins manage entries via the /admin/whitelist CRUD endpoints.
+ */
+model WalletWhitelist {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique @map("wallet_address")
+  maxDepositSol Decimal  @default(10) @map("max_deposit_sol") @db.Decimal(20, 9)
+  note          String?
+  addedBy       String   @map("added_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("wallet_whitelist")
+}
+
 model TokenBlacklist {
   id        String   @id @default(cuid())
   tokenMint String   @unique @map("token_mint")

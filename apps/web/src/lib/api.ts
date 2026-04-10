@@ -148,6 +148,32 @@ class ApiClient {
     return this.fetch<{ data: any[] }>('/withdrawals')
   }
 
+  retryWithdrawal(id: string) {
+    return this.fetch<{ data: { id: string; status: string } }>(`/withdrawals/${id}/retry`, {
+      method: 'POST',
+    })
+  }
+
+  getWithdrawalProgress(id: string) {
+    return this.fetch<{
+      data: {
+        withdrawalStatus: string
+        done: boolean
+        counts: { pending: number; confirmed: number; failed: number; total: number }
+        swaps: Array<{
+          id: string
+          inputMint: string
+          tokenSymbol: string | null
+          outputSol: string | null
+          status: string
+          errorMessage: string | null
+          executedAt: string
+          confirmedAt: string | null
+        }>
+      }
+    }>(`/withdrawals/${id}/progress`)
+  }
+
   // Index (public)
   getIndexCurrent(tier?: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN') {
     return this.fetch<{ data: any }>(`/index/current${tier ? `?tier=${tier}` : ''}`)

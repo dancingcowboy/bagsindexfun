@@ -23,12 +23,17 @@ export async function depositRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Sub-wallet not initialized' })
       }
 
-      // Per-user, per-vault deposit cap (override via USER_DEPOSIT_CAP_SOL).
-      // Initial-phase safety: each user can hold up to 10 SOL net per tier.
-      // Computed as sum(confirmed deposits to this tier) - sum(confirmed
-      // withdrawals from this tier). Pending deposits are not counted so
-      // stuck intents don't block legitimate ones.
-      const vaultCapSol = Number(process.env.USER_DEPOSIT_CAP_SOL ?? '10')
+      // Beta whitelist gate: only wallets in the whitelist may deposit.
+      // Each entry carries a per-user per-tier deposit cap (default 10 SOL).
+      const user = await db.user.findUnique({ where: { id: userId }, select: { walletAddress: true } })
+      const whitelistEntry = user
+        ? await db.walletWhitelist.findUnique({ where: { walletAddress: user.walletAddress } })
+        : null
+      if (!whitelistEntry) {
+        return reply.status(403).send({ error: 'Wallet not whitelisted for beta access' })
+      }
+
+      const vaultCapSol = Number(whitelistEntry.maxDepositSol)
       if (vaultCapSol > 0) {
         const [depAgg, wdAgg] = await Promise.all([
           db.deposit.aggregate({

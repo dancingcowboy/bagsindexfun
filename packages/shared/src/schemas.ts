@@ -68,6 +68,12 @@ export const blacklistTokenSchema = z.object({
   reason: z.string().min(1).max(500),
 })
 
+export const whitelistWalletSchema = z.object({
+  walletAddress: z.string().min(32).max(64),
+  maxDepositSol: z.number().positive().optional().default(10),
+  note: z.string().max(500).optional(),
+})
+
 // ─── Pagination ──────────────────────────────────────────────────────────────
 
 export const paginationSchema = z.object({

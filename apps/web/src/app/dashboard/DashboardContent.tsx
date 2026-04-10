@@ -76,6 +76,7 @@ import { NextCycleCountdown } from '@/components/NextCycleCountdown'
 import { Notice, type NoticeState } from '@/components/Notice'
 import { AllocationProgressModal } from '@/components/AllocationProgressModal'
 import { WithdrawalModal } from '@/components/WithdrawalModal'
+import { WithdrawalProgressModal } from '@/components/WithdrawalProgressModal'
 import { API_BASE } from '@/lib/api'
 
 const SOLANA_RPC_URL =
@@ -100,6 +101,10 @@ export default function DashboardPage() {
     depositId: string
     tier: string
     amountSol: number
+  } | null>(null)
+  const [liquidation, setLiquidation] = useState<{
+    withdrawalId: string
+    tier: string
   } | null>(null)
   // Filter for the "Current Index" constituent table at the bottom.
   // Lets users compare each tier's top-10 token weights side by side.
@@ -820,6 +825,10 @@ export default function DashboardPage() {
             message: 'Your holdings are being liquidated. SOL will arrive in your wallet shortly.',
           })
         }}
+        onProgress={(withdrawalId, tier) => {
+          setShowWithdraw(false)
+          setLiquidation({ withdrawalId, tier })
+        }}
       />
       <Notice notice={notice} onClose={() => setNotice(null)} />
       <AllocationProgressModal
@@ -834,6 +843,20 @@ export default function DashboardPage() {
             kind: 'success',
             title: 'Allocation complete',
             message: 'Your deposit has been swapped into the vault basket.',
+          })
+        }}
+      />
+      <WithdrawalProgressModal
+        withdrawalId={liquidation?.withdrawalId ?? null}
+        tier={liquidation?.tier ?? ''}
+        onClose={() => setLiquidation(null)}
+        onDone={() => {
+          setLiquidation(null)
+          refetchPortfolio()
+          setNotice({
+            kind: 'success',
+            title: 'Withdrawal complete',
+            message: 'Your holdings have been sold and SOL returned to your wallet.',
           })
         }}
       />

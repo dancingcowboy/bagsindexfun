@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { blacklistTokenSchema, RISK_TIERS, TWEET_PLAN, type RiskTier } from '@bags-index/shared'
+import { blacklistTokenSchema, whitelistWalletSchema, RISK_TIERS, TWEET_PLAN, type RiskTier } from '@bags-index/shared'
 import { createSolanaServerWallet } from '@bags-index/solana'
 import { requireAdmin } from '../middleware/auth.js'
 import { scoringQueue, rebalanceQueue, priceSnapshotQueue } from '../queue/queues.js'
@@ -1158,6 +1158,79 @@ export async function adminRoutes(app: FastifyInstance) {
       return { success: true, data: entries }
     } catch (err) {
       app.log.error(err, 'Failed to load blacklist')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  // ─── Wallet Whitelist ──────────────────────────────────────────────────
+
+  /**
+   * GET /admin/whitelist — list all whitelisted wallets
+   */
+  app.get('/whitelist', async (_req, reply) => {
+    try {
+      const entries = await db.walletWhitelist.findMany({
+        orderBy: { createdAt: 'desc' },
+      })
+      return { success: true, data: entries }
+    } catch (err) {
+      app.log.error(err, 'Failed to load whitelist')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/whitelist — add a wallet to the whitelist
+   */
+  app.post('/whitelist', async (req, reply) => {
+    try {
+      const { walletAddress, maxDepositSol, note } = whitelistWalletSchema.parse(req.body)
+      const entry = await db.walletWhitelist.create({
+        data: {
+          walletAddress,
+          maxDepositSol,
+          note,
+          addedBy: req.authUser!.walletAddress,
+        },
+      })
+      return { success: true, data: entry }
+    } catch (err) {
+      app.log.error(err, 'Failed to add to whitelist')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * PATCH /admin/whitelist/:wallet — update cap or note
+   */
+  app.patch('/whitelist/:wallet', async (req, reply) => {
+    try {
+      const { wallet } = req.params as { wallet: string }
+      const body = req.body as { maxDepositSol?: number; note?: string }
+      const data: Record<string, unknown> = {}
+      if (typeof body.maxDepositSol === 'number') data.maxDepositSol = body.maxDepositSol
+      if (typeof body.note === 'string') data.note = body.note
+      const updated = await db.walletWhitelist.update({
+        where: { walletAddress: wallet },
+        data,
+      })
+      return { success: true, data: updated }
+    } catch (err) {
+      app.log.error(err, 'Failed to update whitelist entry')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * DELETE /admin/whitelist/:wallet — remove from whitelist
+   */
+  app.delete('/whitelist/:wallet', async (req, reply) => {
+    try {
+      const { wallet } = req.params as { wallet: string }
+      await db.walletWhitelist.delete({ where: { walletAddress: wallet } })
+      return { success: true }
+    } catch (err) {
+      app.log.error(err, 'Failed to remove from whitelist')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })
