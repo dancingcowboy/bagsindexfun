@@ -101,8 +101,11 @@ export async function buildJupiterSwapTx(params: {
         wrapAndUnwrapSol: true,
         // Dynamic compute unit limit — Jupiter sizes it to the route.
         dynamicComputeUnitLimit: true,
-        // Priority fee auto-set to land fast without overpaying.
-        prioritizationFeeLamports: 'auto',
+        // Jito tip for MEV protection via Helius Sender. Fixed 200k lamports
+        // (0.0002 SOL) — the minimum Helius Sender accepts.
+        prioritizationFeeLamports: {
+          jitoTipLamports: 200_000,
+        },
       },
       { headers: jupHeaders(), timeout: 20_000 },
     )

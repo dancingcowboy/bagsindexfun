@@ -2,7 +2,7 @@ import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
 import {
   buildSellTransaction,
-  submitAndConfirmDirect,
+  submitAndConfirm,
   signVersionedTxBytes,
   transferSolFromServerWallet,
   getNativeSolBalanceLamports,
@@ -71,7 +71,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
         walletId: subWallet.privyWalletId,
         txBytes,
       })
-      const sig = await submitAndConfirmDirect(signed)
+      const sig = await submitAndConfirm(signed)
 
       totalRecoveredLamports += BigInt(quote.outAmount)
 

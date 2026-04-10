@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { buildBuyTransaction, submitAndConfirmDirect, capInputToLiquidity, signVersionedTxBytes, getNativeSolBalanceLamports } from '@bags-index/solana'
+import { buildBuyTransaction, submitAndConfirm, capInputToLiquidity, signVersionedTxBytes, getNativeSolBalanceLamports } from '@bags-index/solana'
 import {
   QUEUE_DEPOSIT,
   TOP_N_TOKENS,
@@ -187,7 +187,7 @@ async function processDeposit(job: Job<DepositJobData>) {
         walletId: subWallet.privyWalletId,
         txBytes,
       })
-      const sig = await submitAndConfirmDirect(signed)
+      const sig = await submitAndConfirm(signed)
       await db.swapExecution.update({
         where: { id: bagsxPending.id },
         data: {
@@ -254,7 +254,7 @@ async function processDeposit(job: Job<DepositJobData>) {
         walletId: subWallet.privyWalletId,
         txBytes,
       })
-      const sig = await submitAndConfirmDirect(signed)
+      const sig = await submitAndConfirm(signed)
 
       await db.swapExecution.update({
         where: { id: pending.id },

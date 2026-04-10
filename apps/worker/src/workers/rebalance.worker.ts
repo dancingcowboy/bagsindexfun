@@ -6,7 +6,7 @@ import {
   buildSellTransaction,
   capInputToLiquidity,
   signVersionedTxBytes,
-  submitAndConfirmDirect,
+  submitAndConfirm,
 } from '@bags-index/solana'
 import {
   QUEUE_REBALANCE,
@@ -291,7 +291,7 @@ async function processSingleWallet(
           walletId: wallet.privyWalletId,
           txBytes,
         })
-        const sig = await submitAndConfirmDirect(signed)
+        const sig = await submitAndConfirm(signed)
         await db.swapExecution.create({
           data: {
             rebalanceCycleId: cycle.id,
@@ -350,7 +350,7 @@ async function processSingleWallet(
           walletId: wallet.privyWalletId,
           txBytes,
         })
-        const sig = await submitAndConfirmDirect(signed)
+        const sig = await submitAndConfirm(signed)
         await db.swapExecution.create({
           data: {
             rebalanceCycleId: cycle.id,

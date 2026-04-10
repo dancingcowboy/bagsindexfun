@@ -1,4 +1,10 @@
-import { VersionedTransaction } from '@solana/web3.js'
+import {
+  VersionedTransaction,
+  TransactionMessage,
+  SystemProgram,
+  PublicKey,
+  AddressLookupTableAccount,
+} from '@solana/web3.js'
 import bs58 from 'bs58'
 import { getConnection } from './connection.js'
 import { getTradeQuote, getSwapTransaction } from './bags.js'
@@ -15,6 +21,54 @@ export interface SwapResult {
 }
 
 export type SwapRoute = 'BAGS' | 'JUPITER'
+
+// ─── Jito tip helpers ─────────────────────────────────────────────────────────
+const JITO_TIP_ACCOUNTS = [
+  '96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5',
+  'HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe',
+  'Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY',
+  'ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49',
+  'DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh',
+  'ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt',
+  'DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL',
+  '3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT',
+]
+const JITO_TIP_LAMPORTS = 200_000 // 0.0002 SOL — Helius Sender minimum
+
+function randomTipAccount(): PublicKey {
+  return new PublicKey(JITO_TIP_ACCOUNTS[Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)])
+}
+
+/**
+ * Append a Jito tip SOL transfer to an existing VersionedTransaction.
+ * Decompiles the message, adds the tip instruction, then recompiles.
+ */
+async function addJitoTip(txBytes: Uint8Array, feePayer: PublicKey): Promise<Uint8Array> {
+  const connection = getConnection()
+  const tx = VersionedTransaction.deserialize(txBytes)
+  const addressLookupTableAccounts: AddressLookupTableAccount[] = []
+
+  // Resolve any address lookup tables used by the transaction
+  for (const key of tx.message.addressTableLookups) {
+    const accountInfo = await connection.getAddressLookupTable(key.accountKey)
+    if (accountInfo.value) addressLookupTableAccounts.push(accountInfo.value)
+  }
+
+  const message = TransactionMessage.decompile(tx.message, { addressLookupTableAccounts })
+  message.instructions.push(
+    SystemProgram.transfer({
+      fromPubkey: feePayer,
+      toPubkey: randomTipAccount(),
+      lamports: JITO_TIP_LAMPORTS,
+    }),
+  )
+
+  // Recompile with a fresh blockhash
+  const { blockhash } = await connection.getLatestBlockhash('confirmed')
+  message.recentBlockhash = blockhash
+  const newTx = new VersionedTransaction(message.compileToV0Message(addressLookupTableAccounts))
+  return newTx.serialize()
+}
 
 /**
  * Unified shape for the swap router. Both Bags and Jupiter expose
@@ -53,6 +107,7 @@ export async function buildBuyTransaction(params: {
 }): Promise<BuiltSwap> {
   const slippage = Math.min(params.slippageBps ?? DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS)
 
+  const feePayer = new PublicKey(params.userPublicKey)
   try {
     const quote = await getTradeQuote({
       inputMint: SOL_MINT,
@@ -64,7 +119,10 @@ export async function buildBuyTransaction(params: {
       quoteResponse: quote,
       userPublicKey: params.userPublicKey,
     })
-    return { txBytes: bs58.decode(swapRes.swapTransaction), quote, route: 'BAGS' }
+    // Bags txs don't include a Jito tip — add one for MEV protection.
+    const rawBytes = bs58.decode(swapRes.swapTransaction)
+    const tippedBytes = await addJitoTip(rawBytes, feePayer)
+    return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
     if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
     console.warn(
@@ -76,6 +134,7 @@ export async function buildBuyTransaction(params: {
       amount: params.solAmount.toString(),
       slippageBps: slippage,
     })
+    // Jupiter swap already includes jitoTipLamports in the built tx.
     const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
     return {
       txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
@@ -96,6 +155,7 @@ export async function buildSellTransaction(params: {
 }): Promise<BuiltSwap> {
   const slippage = Math.min(params.slippageBps ?? DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS)
 
+  const feePayer = new PublicKey(params.userPublicKey)
   try {
     const quote = await getTradeQuote({
       inputMint: params.tokenMint,
@@ -107,7 +167,9 @@ export async function buildSellTransaction(params: {
       quoteResponse: quote,
       userPublicKey: params.userPublicKey,
     })
-    return { txBytes: bs58.decode(swapRes.swapTransaction), quote, route: 'BAGS' }
+    const rawBytes = bs58.decode(swapRes.swapTransaction)
+    const tippedBytes = await addJitoTip(rawBytes, feePayer)
+    return { txBytes: tippedBytes, quote, route: 'BAGS' }
   } catch (err) {
     if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
     console.warn(

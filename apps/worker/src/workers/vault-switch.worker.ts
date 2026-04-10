@@ -5,7 +5,7 @@ import {
   buildSellTransaction,
   capInputToLiquidity,
   signVersionedTxBytes,
-  submitAndConfirmDirect,
+  submitAndConfirm,
 } from '@bags-index/solana'
 import {
   QUEUE_VAULT_SWITCH,
@@ -205,7 +205,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
         walletId: vault.privyWalletId,
         txBytes,
       })
-      const sig = await submitAndConfirmDirect(signed)
+      const sig = await submitAndConfirm(signed)
       const solOutLamports = BigInt(quote.outAmount)
       poolLamports += solOutLamports
 
@@ -293,7 +293,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
         walletId: vault.privyWalletId,
         txBytes,
       })
-      const sig = await submitAndConfirmDirect(signed)
+      const sig = await submitAndConfirm(signed)
 
       await db.swapExecution.create({
         data: {
