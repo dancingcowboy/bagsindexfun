@@ -32,9 +32,9 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn }: Props) {
 
   const activeTiers = tiers.filter((t) => Number(t.currentValueSol) > 0)
 
-  const getPct = (tier: string) => pcts[tier] ?? 100
+  const getPct = (tier: string) => pcts[tier] ?? 0
   const setPct = (tier: string, val: number) =>
-    setPcts((prev) => ({ ...prev, [tier]: Math.max(1, Math.min(100, val)) }))
+    setPcts((prev) => ({ ...prev, [tier]: Math.max(0, Math.min(100, val)) }))
 
   const handleWithdraw = async (tierList: TierInfo[]) => {
     if (busy) return
@@ -150,7 +150,7 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn }: Props) {
                     {/* Percentage slider */}
                     <input
                       type="range"
-                      min={1}
+                      min={0}
                       max={100}
                       value={pct}
                       onChange={(e) => setPct(t.riskTier, Number(e.target.value))}
