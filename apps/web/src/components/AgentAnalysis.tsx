@@ -1,10 +1,32 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 import { useTier } from '@/lib/TierContext'
 import { API_BASE } from '@/lib/api'
+
+function CopyCAButton({ mint }: { mint: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = useCallback(() => {
+    navigator.clipboard.writeText(mint)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [mint])
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); copy() }}
+      className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold transition-colors ${
+        copied
+          ? 'border-[#00D62B]/50 text-[#00D62B]'
+          : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]'
+      }`}
+      title="Copy contract address"
+    >
+      {copied ? 'copied' : 'ca'}
+    </button>
+  )
+}
 import {
   Brain,
   ChevronDown,
@@ -429,22 +451,6 @@ export function AgentAnalysis() {
                             </span>
                           )
                         })()}
-                        <a
-                          href={`https://dexscreener.com/solana/${alloc.tokenMint}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
-                        >
-                          dex
-                        </a>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(alloc.tokenMint) }}
-                          className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
-                          title="Copy contract address"
-                        >
-                          ca
-                        </button>
                       </div>
                     </div>
 
@@ -457,6 +463,19 @@ export function AgentAnalysis() {
                           {SIGNAL_LABELS[s] ?? s}
                         </span>
                       ))}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={`https://dexscreener.com/solana/${alloc.tokenMint}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                      >
+                        dex
+                      </a>
+                      <CopyCAButton mint={alloc.tokenMint} />
                     </div>
 
                     <div
