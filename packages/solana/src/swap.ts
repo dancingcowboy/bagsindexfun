@@ -2,6 +2,7 @@ import { VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
 import { getConnection } from './connection.js'
 import { getTradeQuote, getSwapTransaction } from './bags.js'
+import { getJupiterQuote, buildJupiterSwapTx } from './jupiter-swap.js'
 import { sendJitoProtected, getTokenSolLiquidity } from './helius.js'
 import { SOL_MINT, DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, MAX_LIQUIDITY_PCT, LAMPORTS_PER_SOL } from '@bags-index/shared'
 
@@ -13,60 +14,118 @@ export interface SwapResult {
   outputAmount: string
 }
 
+export type SwapRoute = 'BAGS' | 'JUPITER'
+
 /**
- * Execute a buy (SOL -> token) via Bags trade API.
- * Returns the unsigned transaction bytes for Privy signing.
+ * Unified shape for the swap router. Both Bags and Jupiter expose
+ * `outAmount` and `slippageBps` on their quote responses, so callers can
+ * read those fields without knowing which venue served the trade. The
+ * `route` tag is recorded in SwapExecution.route for post-hoc attribution.
+ */
+export interface BuiltSwap {
+  txBytes: Uint8Array
+  // Both Bags and Jupiter expose `outAmount` and `slippageBps`. Typed loose
+  // here so we can return either venue's response without a discriminated
+  // union; callers only read those two fields.
+  quote: { outAmount: string | number; slippageBps: number } & Record<string, any>
+  route: SwapRoute
+}
+
+const FALLBACK_ENABLED = process.env.BAGS_FALLBACK_ENABLED !== 'false'
+
+function isBagsQuotaError(err: unknown): boolean {
+  const e = err as { response?: { status?: number; data?: { remaining?: number } }; message?: string }
+  if (e?.response?.status === 429) return true
+  if (e?.message?.includes('Bags API quota drained')) return true
+  return false
+}
+
+/**
+ * Build a SOL → token buy. Tries Bags first (hackathon-preferred routing),
+ * falls back to Jupiter v6 on 429 / quota-drained / network error so a
+ * rate-limited Bags endpoint doesn't silently turn a deposit into a no-op.
  */
 export async function buildBuyTransaction(params: {
   tokenMint: string
   solAmount: bigint
   userPublicKey: string
   slippageBps?: number
-}): Promise<{ txBytes: Uint8Array; quote: ReturnType<typeof getTradeQuote> extends Promise<infer T> ? T : never }> {
+}): Promise<BuiltSwap> {
   const slippage = Math.min(params.slippageBps ?? DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS)
 
-  const quote = await getTradeQuote({
-    inputMint: SOL_MINT,
-    outputMint: params.tokenMint,
-    amount: params.solAmount.toString(),
-    slippageBps: slippage,
-  })
-
-  const swapRes = await getSwapTransaction({
-    quoteResponse: quote,
-    userPublicKey: params.userPublicKey,
-  })
-
-  const txBytes = bs58.decode(swapRes.swapTransaction)
-  return { txBytes, quote }
+  try {
+    const quote = await getTradeQuote({
+      inputMint: SOL_MINT,
+      outputMint: params.tokenMint,
+      amount: params.solAmount.toString(),
+      slippageBps: slippage,
+    })
+    const swapRes = await getSwapTransaction({
+      quoteResponse: quote,
+      userPublicKey: params.userPublicKey,
+    })
+    return { txBytes: bs58.decode(swapRes.swapTransaction), quote, route: 'BAGS' }
+  } catch (err) {
+    if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
+    console.warn(
+      `[swap] Bags unavailable for buy ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
+    )
+    const jq = await getJupiterQuote({
+      inputMint: SOL_MINT,
+      outputMint: params.tokenMint,
+      amount: params.solAmount.toString(),
+      slippageBps: slippage,
+    })
+    const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+    return {
+      txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+      quote: jq,
+      route: 'JUPITER',
+    }
+  }
 }
 
 /**
- * Execute a sell (token -> SOL) via Bags trade API.
- * Returns the unsigned transaction bytes for Privy signing.
+ * Build a token → SOL sell. Same cascade: Bags → Jupiter v6 on rate limit.
  */
 export async function buildSellTransaction(params: {
   tokenMint: string
   tokenAmount: bigint
   userPublicKey: string
   slippageBps?: number
-}): Promise<{ txBytes: Uint8Array; quote: ReturnType<typeof getTradeQuote> extends Promise<infer T> ? T : never }> {
+}): Promise<BuiltSwap> {
   const slippage = Math.min(params.slippageBps ?? DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS)
 
-  const quote = await getTradeQuote({
-    inputMint: params.tokenMint,
-    outputMint: SOL_MINT,
-    amount: params.tokenAmount.toString(),
-    slippageBps: slippage,
-  })
-
-  const swapRes = await getSwapTransaction({
-    quoteResponse: quote,
-    userPublicKey: params.userPublicKey,
-  })
-
-  const txBytes = bs58.decode(swapRes.swapTransaction)
-  return { txBytes, quote }
+  try {
+    const quote = await getTradeQuote({
+      inputMint: params.tokenMint,
+      outputMint: SOL_MINT,
+      amount: params.tokenAmount.toString(),
+      slippageBps: slippage,
+    })
+    const swapRes = await getSwapTransaction({
+      quoteResponse: quote,
+      userPublicKey: params.userPublicKey,
+    })
+    return { txBytes: bs58.decode(swapRes.swapTransaction), quote, route: 'BAGS' }
+  } catch (err) {
+    if (!FALLBACK_ENABLED || !isBagsQuotaError(err)) throw err
+    console.warn(
+      `[swap] Bags unavailable for sell ${params.tokenMint.slice(0, 8)}…; falling through to Jupiter`,
+    )
+    const jq = await getJupiterQuote({
+      inputMint: params.tokenMint,
+      outputMint: SOL_MINT,
+      amount: params.tokenAmount.toString(),
+      slippageBps: slippage,
+    })
+    const jSwap = await buildJupiterSwapTx({ quote: jq, userPublicKey: params.userPublicKey })
+    return {
+      txBytes: Buffer.from(jSwap.swapTransaction, 'base64'),
+      quote: jq,
+      route: 'JUPITER',
+    }
+  }
 }
 
 /**

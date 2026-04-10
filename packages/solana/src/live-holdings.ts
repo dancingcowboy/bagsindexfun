@@ -1,5 +1,6 @@
 import { getTokenBalances } from './helius.js'
 import { getBagsSolValue } from './bags.js'
+import { getJupiterSolValue } from './jupiter-swap.js'
 import { getDexVolumes } from './dexscreener.js'
 import { getJupiterPrices } from './jupiter.js'
 import { getNativeSolBalance } from './connection.js'
@@ -67,7 +68,9 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
     const decimals = t.decimals
     const whole = Number(amountBig) / 10 ** decimals
 
-    // Bags: quote ONE whole token → lamports, multiply by amount
+    // Bags: quote ONE whole token → lamports, multiply by amount. If Bags
+    // has no route OR is rate-limited, fall through to Jupiter v6 which
+    // aggregates every Solana DEX and has strictly better coverage.
     let priceSol = 0
     let source: LiveHolding['source'] = 'none'
     try {
@@ -76,6 +79,12 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
       if (lamports !== null) {
         priceSol = Number(lamports) / LAMPORTS_PER_SOL
         source = 'bags'
+      } else {
+        const jLamports = await getJupiterSolValue(t.mint, probe)
+        if (jLamports !== null) {
+          priceSol = Number(jLamports) / LAMPORTS_PER_SOL
+          source = 'jupiter'
+        }
       }
     } catch {
       // fall through

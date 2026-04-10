@@ -266,7 +266,7 @@ async function processSingleWallet(
         const tokenRatio = excessSol / Number(holding.valueSolEst)
         const tokensToSell = BigInt(Math.floor(Number(holding.amount) * tokenRatio))
         if (tokensToSell <= 0n) continue
-        const { txBytes, quote } = await buildSellTransaction({
+        const { txBytes, quote, route } = await buildSellTransaction({
           tokenMint: holding.tokenMint,
           tokenAmount: tokensToSell,
           userPublicKey: wallet.address,
@@ -301,6 +301,7 @@ async function processSingleWallet(
             inputAmount: tokensToSell,
             outputAmount: BigInt(quote.outAmount),
             slippageBps: quote.slippageBps,
+            route,
             status: 'CONFIRMED',
             txSignature: sig,
           },
@@ -323,7 +324,7 @@ async function processSingleWallet(
       const buyLamports = await capInputToLiquidity(tokenMint, desiredLamports)
       const actualSol = Number(buyLamports) / LAMPORTS_PER_SOL
       try {
-        const { txBytes, quote } = await buildBuyTransaction({
+        const { txBytes, quote, route } = await buildBuyTransaction({
           tokenMint,
           solAmount: buyLamports,
           userPublicKey: wallet.address,
@@ -359,6 +360,7 @@ async function processSingleWallet(
             inputAmount: buyLamports,
             outputAmount: BigInt(quote.outAmount),
             slippageBps: quote.slippageBps,
+            route,
             status: 'CONFIRMED',
             txSignature: sig,
           },

@@ -261,6 +261,7 @@ model SwapExecution {
   inputAmount      BigInt          @map("input_amount")
   outputAmount     BigInt?         @map("output_amount")
   slippageBps      Int             @map("slippage_bps")
+  route            String          @default("BAGS") @map("route")
   txSignature      String?         @map("tx_signature")
   status           TxStatus        @default(PENDING)
   errorMessage     String?         @map("error_message")

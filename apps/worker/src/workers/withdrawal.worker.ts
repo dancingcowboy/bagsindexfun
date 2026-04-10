@@ -49,7 +49,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     if (holding.amount <= 0n) continue
 
     try {
-      const { txBytes, quote } = await buildSellTransaction({
+      const { txBytes, quote, route } = await buildSellTransaction({
         tokenMint: holding.tokenMint,
         tokenAmount: holding.amount,
         userPublicKey: subWallet.address,
@@ -81,6 +81,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
           inputAmount: holding.amount,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
+          route,
           status: 'CONFIRMED',
           txSignature: sig,
         },

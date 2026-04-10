@@ -2,6 +2,11 @@ import axios from 'axios'
 import { BAGS_API_BASE } from '@bags-index/shared'
 import type { BagsTokenFeedItem, BagsTradeQuote, BagsSwapResponse } from '@bags-index/shared'
 
+// Shared across all getClient() calls in this process. When Bags returns a
+// 429 with remaining:0, we stash the reset time here so every subsequent
+// request fails fast instead of burning another round-trip + retry storm.
+let bagsQuotaDrainedUntil = 0
+
 function getClient() {
   const apiKey = process.env.BAGS_API_KEY
   if (!apiKey) throw new Error('BAGS_API_KEY is required')
@@ -10,23 +15,49 @@ function getClient() {
     headers: { 'x-api-key': apiKey },
     timeout: 15_000,
   })
-  // Retry with exponential backoff on 429 (rate limit) and 5xx. The Bags
-  // trade API throttles aggressively when a deposit allocation fans out
-  // into 11 quote+swap pairs back-to-back, and a swallowed 429 turned a
-  // user's CONSERVATIVE deposit into a no-op (deposit cmns5gfsj 2026-04-10).
-  client.interceptors.response.use(undefined, async (err) => {
-    const cfg: any = err.config
-    if (!cfg) throw err
-    const status = err.response?.status
-    const retriable = status === 429 || (status >= 500 && status < 600)
-    if (!retriable) throw err
-    cfg.__bagsRetry = (cfg.__bagsRetry ?? 0) + 1
-    if (cfg.__bagsRetry > 4) throw err
-    // 1s → 2s → 4s → 8s, with jitter so parallel callers don't sync up.
-    const base = 1000 * Math.pow(2, cfg.__bagsRetry - 1)
-    const wait = base + Math.floor(Math.random() * 400)
-    await new Promise((r) => setTimeout(r, wait))
-    return client.request(cfg)
+  // Bags enforces a hard 1000 req/hour quota that resets at the top of each
+  // hour. The 429 body carries `{ limit, remaining, resetTime }` — no
+  // Retry-After header. Strategy:
+  //   - If `remaining === 0`, the bucket is drained. Don't retry; throw fast
+  //     so callers fail loud instead of amplifying the burn 5x.
+  //   - For 5xx (and 429 without a drained body, e.g. transient), do up to
+  //     2 quick retries with jittered backoff.
+  // Also tracks a cached reset timestamp so once we're drained, subsequent
+  // calls short-circuit without even hitting the network.
+  client.interceptors.response.use(
+    (res) => res,
+    async (err) => {
+      const cfg: any = err.config
+      if (!cfg) throw err
+      const status = err.response?.status
+      const body = err.response?.data
+      if (status === 429) {
+        // Remember the reset so future callers fail fast.
+        if (body?.resetTime) {
+          bagsQuotaDrainedUntil = new Date(body.resetTime).getTime()
+        }
+        // Quota drained → no point retrying.
+        if (body?.remaining === 0) throw err
+      }
+      const retriable = status === 429 || (status >= 500 && status < 600)
+      if (!retriable) throw err
+      cfg.__bagsRetry = (cfg.__bagsRetry ?? 0) + 1
+      if (cfg.__bagsRetry > 2) throw err
+      const base = 1000 * Math.pow(2, cfg.__bagsRetry - 1)
+      const wait = base + Math.floor(Math.random() * 400)
+      await new Promise((r) => setTimeout(r, wait))
+      return client.request(cfg)
+    },
+  )
+  // Pre-flight: if we know the quota is drained, fail immediately.
+  client.interceptors.request.use((cfg) => {
+    if (bagsQuotaDrainedUntil && Date.now() < bagsQuotaDrainedUntil) {
+      const secs = Math.ceil((bagsQuotaDrainedUntil - Date.now()) / 1000)
+      throw new Error(
+        `Bags API quota drained — resets in ${secs}s (at ${new Date(bagsQuotaDrainedUntil).toISOString()})`,
+      )
+    }
+    return cfg
   })
   return client
 }
@@ -86,10 +117,23 @@ export async function getTradeQuote(params: {
  * prices.
  */
 const WSOL_MINT_INTERNAL = 'So11111111111111111111111111111111111111112'
+// In-process TTL cache for valuation quotes. The hourly price-snapshot
+// worker, the dashboard live-read, and the /portfolio/pnl route all hit
+// this helper with overlapping mints — without caching, a single dashboard
+// load from two users fans out into dozens of /trade/quote calls, which
+// punches through the Bags 1000 req/hour bucket in minutes.
+// TTL is 60s — price moves on illiquid memes happen fast, but a minute of
+// staleness is acceptable for valuation (not for buy quotes, which
+// intentionally go through getTradeQuote, not this helper).
+const VALUATION_TTL_MS = 60_000
+const valuationCache = new Map<string, { value: bigint | null; at: number }>()
 export async function getBagsSolValue(
   tokenMint: string,
   amountBaseUnits: string,
 ): Promise<bigint | null> {
+  const cacheKey = `${tokenMint}:${amountBaseUnits}`
+  const hit = valuationCache.get(cacheKey)
+  if (hit && Date.now() - hit.at < VALUATION_TTL_MS) return hit.value
   try {
     const client = getClient()
     const res = await client.get('/trade/quote', {
@@ -103,9 +147,12 @@ export async function getBagsSolValue(
     })
     const data = res.data?.response ?? res.data
     const out = data?.outAmount ?? data?.quote?.outAmount
-    if (!out) return null
-    return BigInt(out)
+    const value = out ? BigInt(out) : null
+    valuationCache.set(cacheKey, { value, at: Date.now() })
+    return value
   } catch {
+    // Cache negative result too — hammering a dead route wastes quota.
+    valuationCache.set(cacheKey, { value: null, at: Date.now() })
     return null
   }
 }

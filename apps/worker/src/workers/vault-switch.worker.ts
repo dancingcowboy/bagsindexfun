@@ -196,7 +196,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
   for (const plan of sellPlans) {
     if (plan.sellAmount <= 0n) continue
     try {
-      const { txBytes, quote } = await buildSellTransaction({
+      const { txBytes, quote, route } = await buildSellTransaction({
         tokenMint: plan.mint,
         tokenAmount: plan.sellAmount,
         userPublicKey: vault.address,
@@ -217,6 +217,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
           inputAmount: plan.sellAmount,
           outputAmount: solOutLamports < 0n ? 0n : solOutLamports,
           slippageBps: quote.slippageBps,
+          route,
           status: 'CONFIRMED',
           txSignature: sig,
         },
@@ -283,7 +284,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
     const capped = await capInputToLiquidity(plan.mint, scaled)
     const solForToken = Number(capped) / LAMPORTS_PER_SOL
     try {
-      const { txBytes, quote } = await buildBuyTransaction({
+      const { txBytes, quote, route } = await buildBuyTransaction({
         tokenMint: plan.mint,
         solAmount: capped,
         userPublicKey: vault.address,
@@ -302,6 +303,7 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
           inputAmount: capped,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
+          route,
           status: 'CONFIRMED',
           txSignature: sig,
         },

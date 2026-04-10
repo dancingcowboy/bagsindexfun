@@ -93,7 +93,7 @@ async function processDeposit(job: Job<DepositJobData>) {
     try {
       const capped = await capInputToLiquidity(BAGSX_MINT, bagsxLamports)
       const solForBagsx = Number(capped) / LAMPORTS_PER_SOL
-      const { txBytes, quote } = await buildBuyTransaction({
+      const { txBytes, quote, route } = await buildBuyTransaction({
         tokenMint: BAGSX_MINT,
         solAmount: capped,
         userPublicKey: subWallet.address,
@@ -111,6 +111,7 @@ async function processDeposit(job: Job<DepositJobData>) {
           inputAmount: capped,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
+          route,
           status: 'CONFIRMED',
           txSignature: sig,
         },
@@ -157,7 +158,7 @@ async function processDeposit(job: Job<DepositJobData>) {
     const solForToken = Number(lamports) / LAMPORTS_PER_SOL
 
     try {
-      const { txBytes, quote } = await buildBuyTransaction({
+      const { txBytes, quote, route } = await buildBuyTransaction({
         tokenMint: score.tokenMint,
         solAmount: lamports,
         userPublicKey: subWallet.address,
@@ -178,6 +179,7 @@ async function processDeposit(job: Job<DepositJobData>) {
           inputAmount: lamports,
           outputAmount: BigInt(quote.outAmount),
           slippageBps: quote.slippageBps,
+          route,
           status: 'CONFIRMED',
           txSignature: sig,
         },

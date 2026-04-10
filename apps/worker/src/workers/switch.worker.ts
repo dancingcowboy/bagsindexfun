@@ -209,7 +209,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
     for (const plan of sellPlans) {
       if (plan.sellAmount <= 0n) continue
       try {
-        const { txBytes, quote } = await buildSellTransaction({
+        const { txBytes, quote, route } = await buildSellTransaction({
           tokenMint: plan.mint,
           tokenAmount: plan.sellAmount,
           userPublicKey: srcWallet.address,
@@ -232,6 +232,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
             inputAmount: plan.sellAmount,
             outputAmount: soloutGuard(solOutLamports),
             slippageBps: quote.slippageBps,
+            route,
             status: 'CONFIRMED',
             txSignature: sig,
           },
@@ -367,7 +368,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
       const capped = await capInputToLiquidity(plan.mint, scaled)
       const solForToken = Number(capped) / LAMPORTS_PER_SOL
       try {
-        const { txBytes, quote } = await buildBuyTransaction({
+        const { txBytes, quote, route } = await buildBuyTransaction({
           tokenMint: plan.mint,
           solAmount: capped,
           userPublicKey: dstWallet.address,
@@ -387,6 +388,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
             inputAmount: capped,
             outputAmount: BigInt(quote.outAmount),
             slippageBps: quote.slippageBps,
+            route,
             status: 'CONFIRMED',
             txSignature: sig,
           },
