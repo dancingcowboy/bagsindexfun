@@ -27,6 +27,9 @@ const app = Fastify({
   // 8 MB — tweet image uploads come in as base64 data URLs through the
   // regular JSON PATCH /admin/tweets/:id endpoint.
   bodyLimit: 8 * 1024 * 1024,
+  // Behind nginx — trust X-Forwarded-For so req.ip is the real client IP.
+  // Without this, all requests share 127.0.0.1 and rate-limiting is global.
+  trustProxy: true,
 })
 
 // ─── Plugins ─────────────────────────────────────────────────────────────────
@@ -108,9 +111,9 @@ app.addHook('onResponse', async (req, reply) => {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-// Auth — rate limit (20 req/min per IP). Tighter cap than the global limiter
-// to blunt credential stuffing / token brute-force. Still well above what a
-// normal Privy state-change cycle needs.
+// Auth — rate limit login/logout (20 req/min per IP) to blunt credential
+// stuffing. /auth/me is registered separately under the global limiter so
+// read-only identity checks aren't blocked by login retry storms.
 await app.register(async (scoped) => {
   await scoped.register(rateLimit, {
     max: 20,
