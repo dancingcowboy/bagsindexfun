@@ -350,6 +350,21 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+/**
+ * Maps a forwarded DM in the support group back to the original DM
+ * chat with the bot. Used so admins can reply in-thread to a forwarded
+ * message and have the reply delivered to the DM sender even when
+ * Telegram's forward-privacy setting strips `forward_from` metadata.
+ */
+model TelegramDmForward {
+  id              String   @id @default(cuid())
+  groupMessageId  Int      @unique @map("group_message_id")
+  dmChatId        BigInt   @map("dm_chat_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("telegram_dm_forwards")
+}
+
 model TokenBlacklist {
   id        String   @id @default(cuid())
   tokenMint String   @unique @map("token_mint")

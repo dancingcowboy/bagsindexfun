@@ -116,16 +116,17 @@ export async function chatRoutes(app: FastifyInstance) {
     if (!message) return { ok: true }
 
     // Case 1: DM to the bot — forward the raw message into the support
-    // group. Using forwardMessage preserves the sender attribution natively
-    // in Telegram, so admins can just tap the forwarded message to reply
-    // directly back to the original DM sender.
+    // group and persist a mapping from the forwarded message's id in the
+    // group to the DM chat id. The mapping is the authoritative route-
+    // back channel: it works even when the user has forward-privacy
+    // enabled and Telegram strips `forward_from` from the group copy.
     if (
       message.chat?.type === 'private' &&
       TELEGRAM_BOT_TOKEN &&
       TELEGRAM_CHAT_ID
     ) {
       try {
-        await fetch(
+        const res = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/forwardMessage`,
           {
             method: 'POST',
@@ -137,6 +138,21 @@ export async function chatRoutes(app: FastifyInstance) {
             }),
           },
         )
+        const data = (await res.json()) as {
+          ok?: boolean
+          result?: { message_id?: number }
+          description?: string
+        }
+        if (data.ok && data.result?.message_id) {
+          await db.telegramDmForward.create({
+            data: {
+              groupMessageId: data.result.message_id,
+              dmChatId: BigInt(message.chat.id),
+            },
+          })
+        } else {
+          app.log.error({ data }, 'Telegram forwardMessage rejected')
+        }
       } catch (err) {
         app.log.error({ err }, 'Failed to forward Telegram DM to support group')
       }
@@ -153,17 +169,27 @@ export async function chatRoutes(app: FastifyInstance) {
     const replyTo = message.reply_to_message
     if (!replyTo) return { ok: true }
 
-    // Case 2a: the reply is to a forwarded DM (Case 1). Telegram's
-    // forwardMessage preserves the original sender in `forward_from`
-    // (legacy) or `forward_origin.sender_user` (Bot API 7.0+). A DM with
-    // the bot uses chat_id === user_id, so we can sendMessage straight
-    // back with no mapping table.
+    // Case 2a: the reply is to a forwarded DM (Case 1). Prefer the DB
+    // mapping we wrote when forwarding — it's the only source that
+    // survives Telegram's forward-privacy setting. Fall back to the
+    // `forward_from` / `forward_origin.sender_user` metadata only for
+    // legacy rows that pre-date the mapping table.
+    const mapping = replyTo.message_id
+      ? await db.telegramDmForward.findUnique({
+          where: { groupMessageId: replyTo.message_id },
+        })
+      : null
     const forwardOrigin = replyTo.forward_origin as
       | { type: string; sender_user?: { id: number } }
       | undefined
-    const forwardedFromId: number | undefined =
-      replyTo.forward_from?.id ??
-      (forwardOrigin?.type === 'user' ? forwardOrigin.sender_user?.id : undefined)
+    let forwardedFromId: number | undefined
+    if (mapping) {
+      forwardedFromId = Number(mapping.dmChatId)
+    } else if (replyTo.forward_from?.id) {
+      forwardedFromId = replyTo.forward_from.id
+    } else if (forwardOrigin?.type === 'user') {
+      forwardedFromId = forwardOrigin.sender_user?.id
+    }
 
     if (forwardedFromId && TELEGRAM_BOT_TOKEN) {
       try {
