@@ -98,8 +98,12 @@ export async function chatRoutes(app: FastifyInstance) {
 
   /**
    * POST /chat/webhook
-   * Telegram webhook — when you reply to a user message in TG,
-   * this saves the reply so the user sees it in the chat widget.
+   * Telegram webhook — handles two kinds of updates:
+   *   1. DM to the bot from any user → forwarded into the support group
+   *      so admins see it alongside dashboard chat messages.
+   *   2. Reply inside the support group to a forwarded dashboard message
+   *      → saved as a `support` chat message so the user sees it in the
+   *      in-dashboard chat widget.
    */
   app.post('/webhook', async (req, reply) => {
     const token = req.headers['x-telegram-bot-api-secret-token']
@@ -111,6 +115,36 @@ export async function chatRoutes(app: FastifyInstance) {
     const message = body?.message
     if (!message) return { ok: true }
 
+    // Case 1: DM to the bot — forward the raw message into the support
+    // group. Using forwardMessage preserves the sender attribution natively
+    // in Telegram, so admins can just tap the forwarded message to reply
+    // directly back to the original DM sender.
+    if (
+      message.chat?.type === 'private' &&
+      TELEGRAM_BOT_TOKEN &&
+      TELEGRAM_CHAT_ID
+    ) {
+      try {
+        await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/forwardMessage`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: TELEGRAM_CHAT_ID,
+              from_chat_id: message.chat.id,
+              message_id: message.message_id,
+            }),
+          },
+        )
+      } catch (err) {
+        app.log.error({ err }, 'Failed to forward Telegram DM to support group')
+      }
+      return { ok: true }
+    }
+
+    // Case 2: reply inside the support group → route back to the dashboard
+    // user whose message this is replying to.
     if (String(message.chat?.id) !== TELEGRAM_CHAT_ID) return { ok: true }
 
     const replyText = message.text
