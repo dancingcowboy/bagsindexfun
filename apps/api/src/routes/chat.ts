@@ -3,7 +3,10 @@ import { db } from '@bags-index/db'
 import { requireAuth } from '../middleware/auth.js'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || ''
+// Support chat + DM-forward destination. Intentionally separate from
+// TELEGRAM_CHAT_ID (which is the system-notices / reshuffle group), so
+// user-facing chat doesn't mix with automated protocol updates.
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_SUPPORT_CHAT_ID || ''
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || ''
 
 function escapeMarkdown(text: string): string {

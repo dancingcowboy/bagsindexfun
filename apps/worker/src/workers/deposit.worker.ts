@@ -13,6 +13,16 @@ import {
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
+import { postToTelegram } from '../lib/telegram.js'
+
+// Protocol-vault user's privy id — fee-claim auto-compounds run as this
+// user. Skip Telegram notices for them so we don't spam the reshuffle
+// channel every time accrued vault fees get redeployed.
+const SYSTEM_VAULT_PRIVY_ID = 'system:protocol-vault'
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
 
 interface DepositJobData {
   depositId: string
@@ -317,6 +327,55 @@ async function processDeposit(job: Job<DepositJobData>) {
     )
   } catch (err) {
     logger.error(`[deposit] reconcile failed: ${err}`)
+  }
+
+  // Post a Telegram notice to the reshuffle channel summarising the
+  // deposit + what was bought. Skip auto-compound deposits from the
+  // protocol vault itself (fee-claim pipeline) so we don't spam the
+  // channel on every internal redeployment.
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { privyUserId: true, walletAddress: true },
+    })
+    if (user && user.privyUserId !== SYSTEM_VAULT_PRIVY_ID) {
+      const swaps = await db.swapExecution.findMany({
+        where: {
+          subWalletId: subWallet.id,
+          status: 'CONFIRMED',
+          inputMint: SOL_MINT,
+          executedAt: { gte: deposit.createdAt },
+        },
+        select: { outputMint: true, inputAmount: true },
+      })
+      // Resolve symbols via latest TokenScore rows for each mint.
+      const mints = Array.from(new Set(swaps.map((s) => s.outputMint)))
+      const scoreRows = mints.length
+        ? await db.tokenScore.findMany({
+            where: { tokenMint: { in: mints } },
+            select: { tokenMint: true, tokenSymbol: true },
+            distinct: ['tokenMint'],
+            orderBy: { scoredAt: 'desc' },
+          })
+        : []
+      const symbolByMint = new Map(scoreRows.map((r) => [r.tokenMint, r.tokenSymbol]))
+      const lines = swaps
+        .map((s) => {
+          const sym =
+            symbolByMint.get(s.outputMint) ??
+            `${s.outputMint.slice(0, 4)}…${s.outputMint.slice(-4)}`
+          const sol = (Number(s.inputAmount) / LAMPORTS_PER_SOL).toFixed(4)
+          return `• ${escapeHtml(sym)} — ${sol} SOL`
+        })
+        .join('\n')
+      const wallet = `${user.walletAddress.slice(0, 4)}…${user.walletAddress.slice(-4)}`
+      const amount = Number(deposit.amountSol).toFixed(4)
+      const header = `💰 <b>New deposit — ${deposit.riskTier}</b>\n${amount} SOL from <code>${wallet}</code>`
+      const body = lines ? `\n\n<b>Bought:</b>\n${lines}` : ''
+      await postToTelegram(`${header}${body}`)
+    }
+  } catch (err) {
+    logger.error(`[deposit] telegram notice failed: ${err}`)
   }
 
   logger.info(`[deposit] Allocation complete for deposit ${depositId}`)
