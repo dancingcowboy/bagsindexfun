@@ -16,7 +16,7 @@
     "generate": "prisma generate",
     "push": "prisma db push",
     "migrate": "prisma migrate dev",
-    "studio": "prisma studio",
+    "studio": "prisma studio --hostname 127.0.0.1 --browser none",
     "build": "tsc"
   },
   "dependencies": {
