@@ -116,27 +116,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const body = req.body as any
     const message = body?.message
-    if (!message) {
-      app.log.info({ update: body }, '[chat/webhook] non-message update')
-      return { ok: true }
-    }
-
-    // TEMP DEBUG — log what we actually receive so we can diagnose the
-    // reply-back flow. Safe to strip once reply-back is confirmed.
-    app.log.info(
-      {
-        chatId: message.chat?.id,
-        chatType: message.chat?.type,
-        configuredChatId: TELEGRAM_CHAT_ID,
-        messageId: message.message_id,
-        hasReplyTo: !!message.reply_to_message,
-        replyToId: message.reply_to_message?.message_id,
-        replyToForwardFromId: message.reply_to_message?.forward_from?.id,
-        replyToForwardOrigin: message.reply_to_message?.forward_origin?.type,
-        textPreview: (message.text || '').slice(0, 80),
-      },
-      '[chat/webhook] received',
-    )
+    if (!message) return { ok: true }
 
     // Case 1: DM to the bot — forward the raw message into the support
     // group and persist a mapping from the forwarded message's id in the
@@ -214,10 +194,6 @@ export async function chatRoutes(app: FastifyInstance) {
       forwardedFromId = forwardOrigin.sender_user?.id
     }
 
-    app.log.info(
-      { mapping: !!mapping, forwardedFromId, hasToken: !!TELEGRAM_BOT_TOKEN },
-      '[chat/webhook] reply-back resolution',
-    )
     if (forwardedFromId && TELEGRAM_BOT_TOKEN) {
       try {
         const res = await fetch(
@@ -231,8 +207,7 @@ export async function chatRoutes(app: FastifyInstance) {
             }),
           },
         )
-        const data = (await res.json()) as { ok?: boolean; description?: string; result?: { message_id?: number } }
-        app.log.info({ data }, '[chat/webhook] sendMessage result')
+        const data = (await res.json()) as { ok?: boolean; description?: string }
         if (!data.ok) {
           app.log.error({ data }, 'Failed to deliver group reply to DM sender')
           // Let the admin know their reply didn't land, threaded under
