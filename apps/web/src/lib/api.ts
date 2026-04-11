@@ -45,7 +45,7 @@ class ApiClient {
   }
 
   logout() {
-    return this.fetch('/auth/logout', { method: 'POST' })
+    return this.fetch('/auth/logout', { method: 'POST', body: '{}' })
   }
 
   // Portfolio

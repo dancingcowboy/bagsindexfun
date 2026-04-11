@@ -112,12 +112,11 @@ app.addHook('onResponse', async (req, reply) => {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-// Auth — rate limit login/logout (20 req/min per IP) to blunt credential
-// stuffing. /auth/me is registered separately under the global limiter so
-// read-only identity checks aren't blocked by login retry storms.
+// Auth — rate limit auth routes (60 req/min per IP) to blunt credential
+// stuffing while not blocking the AuthBridge's login/me/logout cycle.
 await app.register(async (scoped) => {
   await scoped.register(rateLimit, {
-    max: 20,
+    max: 60,
     timeWindow: '1 minute',
     redis,
     keyGenerator: (req) => req.ip,

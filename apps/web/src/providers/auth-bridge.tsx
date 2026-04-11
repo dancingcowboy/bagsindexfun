@@ -19,9 +19,6 @@ export function AuthBridge() {
   useEffect(() => {
     if (!ready) return
     if (!authenticated) {
-      // No-op for cookie-based auth; /auth/logout clears the cookie server-side.
-      // We also proactively ping logout to invalidate the server-side JTI.
-      api.logout().catch(() => {})
       // NOTE: do not clear `blocked` here. When a non-allowlisted wallet logs
       // in, we Privy-logout the user inside the catch below — that flips
       // `authenticated` back to false and would otherwise dismiss the overlay
