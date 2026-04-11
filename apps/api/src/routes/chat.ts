@@ -144,7 +144,7 @@ export async function chatRoutes(app: FastifyInstance) {
     }
 
     // Case 2: reply inside the support group → route back to the dashboard
-    // user whose message this is replying to.
+    // user or DM sender whose message this is replying to.
     if (String(message.chat?.id) !== TELEGRAM_CHAT_ID) return { ok: true }
 
     const replyText = message.text
@@ -153,6 +153,58 @@ export async function chatRoutes(app: FastifyInstance) {
     const replyTo = message.reply_to_message
     if (!replyTo) return { ok: true }
 
+    // Case 2a: the reply is to a forwarded DM (Case 1). Telegram's
+    // forwardMessage preserves the original sender in `forward_from`
+    // (legacy) or `forward_origin.sender_user` (Bot API 7.0+). A DM with
+    // the bot uses chat_id === user_id, so we can sendMessage straight
+    // back with no mapping table.
+    const forwardOrigin = replyTo.forward_origin as
+      | { type: string; sender_user?: { id: number } }
+      | undefined
+    const forwardedFromId: number | undefined =
+      replyTo.forward_from?.id ??
+      (forwardOrigin?.type === 'user' ? forwardOrigin.sender_user?.id : undefined)
+
+    if (forwardedFromId && TELEGRAM_BOT_TOKEN) {
+      try {
+        const res = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: forwardedFromId,
+              text: replyText,
+            }),
+          },
+        )
+        const data = (await res.json()) as { ok?: boolean; description?: string }
+        if (!data.ok) {
+          app.log.error({ data }, 'Failed to deliver group reply to DM sender')
+          // Let the admin know their reply didn't land, threaded under
+          // their own message so it's easy to spot in the group.
+          await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                reply_to_message_id: message.message_id,
+                text: `⚠️ Couldn't deliver reply: ${data.description ?? 'unknown error'}`,
+              }),
+            },
+          ).catch(() => {})
+        }
+      } catch (err) {
+        app.log.error({ err }, 'Failed to deliver group reply to DM sender')
+      }
+      return { ok: true }
+    }
+
+    // Case 2b: legacy dashboard chat reply — the original support message
+    // was sent via sendMessage (not forwardMessage) and encodes the
+    // internal User ID in its text. Extract it and save the reply.
     const originalText = replyTo.text || ''
     const userIdMatch = originalText.match(/User ID:\s*(\S+)/)
     if (!userIdMatch) return { ok: true }
