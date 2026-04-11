@@ -1,0 +1,4 @@
+Contact: https://x.com/bagsIndexSol
+Expires: 2027-04-11T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://bagsindex.fun/.well-known/security.txt
