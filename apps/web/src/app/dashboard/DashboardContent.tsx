@@ -90,6 +90,10 @@ export default function DashboardPage() {
   const [showDeposit, setShowDeposit] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
   const [depositTier, setDepositTier] = useState<'CONSERVATIVE' | 'BALANCED' | 'DEGEN'>('BALANCED')
+  // 'single' = deposit all SOL into one tier (classic flow).
+  // 'split'  = split the total equally across all three vaults in one
+  //            signed transaction, then queue 3 allocation progress modals.
+  const [depositMode, setDepositMode] = useState<'single' | 'split'>('single')
   const [depositing, setDepositing] = useState(false)
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [showWithdraw, setShowWithdraw] = useState(false)
@@ -103,6 +107,14 @@ export default function DashboardPage() {
     tier: string
     amountSol: number
   } | null>(null)
+  // When a split deposit creates 3 deposits at once, we show the allocation
+  // progress modal for the first and hold the rest here so we can pop the
+  // next one as each tier finishes.
+  const [allocationQueue, setAllocationQueue] = useState<Array<{
+    depositId: string
+    tier: string
+    amountSol: number
+  }>>([])
   const [liquidation, setLiquidation] = useState<{
     withdrawalId: string
     tier: string
@@ -191,22 +203,55 @@ export default function DashboardPage() {
     }
     if (depositing) return
     setDepositing(true)
-    setDepositStatus('Creating deposit intent…')
     try {
-      const res = await api.createDeposit(amount, depositTier)
-      const destination = res.data.subWalletAddress as string
-      const depositId = res.data.id as string
+      // Build the list of legs: one for single-tier, three for split.
+      // Split into equal integer lamport chunks and dump the rounding
+      // dust onto the last leg so the lamport totals match `amount`.
+      type Leg = { tier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'; amountSol: number; lamports: number }
+      const totalLamports = Math.round(amount * LAMPORTS_PER_SOL)
+      let legs: Leg[]
+      if (depositMode === 'split') {
+        const per = Math.floor(totalLamports / 3)
+        const remainder = totalLamports - per * 2 // last leg absorbs dust
+        legs = [
+          { tier: 'CONSERVATIVE', amountSol: per / LAMPORTS_PER_SOL, lamports: per },
+          { tier: 'BALANCED', amountSol: per / LAMPORTS_PER_SOL, lamports: per },
+          { tier: 'DEGEN', amountSol: remainder / LAMPORTS_PER_SOL, lamports: remainder },
+        ]
+      } else {
+        legs = [{ tier: depositTier, amountSol: amount, lamports: totalLamports }]
+      }
+
+      setDepositStatus(
+        legs.length > 1 ? 'Creating 3 deposit intents…' : 'Creating deposit intent…',
+      )
+      // Each tier has its own sub-wallet destination; create a Deposit row
+      // per tier so the allocation worker picks them up independently.
+      const createdLegs: Array<Leg & { depositId: string; destination: string }> = []
+      for (const leg of legs) {
+        const res = await api.createDeposit(leg.amountSol, leg.tier)
+        createdLegs.push({
+          ...leg,
+          depositId: res.data.id as string,
+          destination: res.data.subWalletAddress as string,
+        })
+      }
 
       setDepositStatus('Building transaction…')
       const connection = new Connection(SOLANA_RPC_URL, 'confirmed')
       const fromPubkey = new PublicKey(wallet.address)
-      const toPubkey = new PublicKey(destination)
-      const lamports = Math.round(amount * LAMPORTS_PER_SOL)
 
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
-      const tx = new Transaction({ feePayer: fromPubkey, blockhash, lastValidBlockHeight }).add(
-        SystemProgram.transfer({ fromPubkey, toPubkey, lamports }),
-      )
+      const tx = new Transaction({ feePayer: fromPubkey, blockhash, lastValidBlockHeight })
+      for (const leg of createdLegs) {
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey,
+            toPubkey: new PublicKey(leg.destination),
+            lamports: leg.lamports,
+          }),
+        )
+      }
       const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false })
 
       setDepositStatus('Waiting for wallet signature…')
@@ -237,14 +282,22 @@ export default function DashboardPage() {
       }
 
       setDepositStatus('Notifying backend…')
-      await api.confirmDeposit(depositId, txSignature)
+      // Reuse the same signature across all 3 legs — /confirm doesn't
+      // verify the tx contents, it just flips status and enqueues the job.
+      for (const leg of createdLegs) {
+        await api.confirmDeposit(leg.depositId, txSignature)
+      }
 
       setShowDeposit(false)
       setDepositAmount('')
       setDepositStatus(null)
-      // Open the live allocation progress modal; it polls the worker and
-      // refetches the portfolio once every swap has settled.
-      setAllocation({ depositId, tier: depositTier, amountSol: amount })
+      // Open the live allocation progress modal for the first leg; the
+      // rest go into the queue and pop when the current one finishes.
+      const [first, ...rest] = createdLegs
+      setAllocation({ depositId: first.depositId, tier: first.tier, amountSol: first.amountSol })
+      setAllocationQueue(
+        rest.map((r) => ({ depositId: r.depositId, tier: r.tier, amountSol: r.amountSol })),
+      )
     } catch (err: any) {
       setDepositStatus(null)
       setNotice({
@@ -421,18 +474,24 @@ export default function DashboardPage() {
               <h2 className="font-[family-name:var(--font-display)] text-xl font-bold mb-4">
                 Deposit SOL
               </h2>
+              {/* Mode toggle: single tier vs. split across all three vaults. */}
               <div className="mb-4">
                 <label className="block text-sm text-[var(--color-text-muted)] mb-2">
-                  Index
+                  Mode
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((tier) => {
-                    const active = depositTier === tier
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { key: 'single', label: 'Single vault' },
+                      { key: 'split', label: 'Split all 3' },
+                    ] as const
+                  ).map((m) => {
+                    const active = depositMode === m.key
                     return (
                       <button
-                        key={tier}
+                        key={m.key}
                         type="button"
-                        onClick={() => setDepositTier(tier)}
+                        onClick={() => setDepositMode(m.key)}
                         className="rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
                         style={
                           active
@@ -440,12 +499,47 @@ export default function DashboardPage() {
                             : { borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }
                         }
                       >
-                        {tier}
+                        {m.label}
                       </button>
                     )
                   })}
                 </div>
               </div>
+              {depositMode === 'single' ? (
+                <div className="mb-4">
+                  <label className="block text-sm text-[var(--color-text-muted)] mb-2">
+                    Index
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const).map((tier) => {
+                      const active = depositTier === tier
+                      return (
+                        <button
+                          key={tier}
+                          type="button"
+                          onClick={() => setDepositTier(tier)}
+                          className="rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
+                          style={
+                            active
+                              ? { background: '#00D62B', color: '#000', borderColor: '#00D62B' }
+                              : { borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }
+                          }
+                        >
+                          {tier}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4 rounded-lg border border-[var(--color-border)] bg-black/20 p-3 text-xs text-[var(--color-text-muted)]">
+                  Your total will be split equally across all three vaults
+                  (~{(() => {
+                    const n = parseFloat(depositAmount)
+                    return Number.isFinite(n) && n > 0 ? (n / 3).toFixed(4) : '0.0000'
+                  })()} SOL each) in a single signed transaction.
+                </div>
+              )}
               <div className="mb-4">
                 <label className="block text-sm text-[var(--color-text-muted)] mb-2">
                   Amount (SOL)
@@ -836,15 +930,27 @@ export default function DashboardPage() {
         depositId={allocation?.depositId ?? null}
         tier={allocation?.tier ?? ''}
         amountSol={allocation?.amountSol ?? 0}
-        onClose={() => setAllocation(null)}
-        onDone={() => {
+        onClose={() => {
+          // Closing the modal mid-split dismisses the whole queue — the
+          // worker keeps processing in the background either way.
           setAllocation(null)
+          setAllocationQueue([])
+        }}
+        onDone={() => {
           refetchPortfolio()
-          setNotice({
-            kind: 'success',
-            title: 'Allocation complete',
-            message: 'Your deposit has been swapped into the vault basket.',
-          })
+          if (allocationQueue.length > 0) {
+            // Pop the next leg of a split deposit and keep the modal open.
+            const [next, ...rest] = allocationQueue
+            setAllocation(next)
+            setAllocationQueue(rest)
+          } else {
+            setAllocation(null)
+            setNotice({
+              kind: 'success',
+              title: 'Allocation complete',
+              message: 'Your deposit has been swapped into the vault basket.',
+            })
+          }
         }}
       />
       <WithdrawalProgressModal
