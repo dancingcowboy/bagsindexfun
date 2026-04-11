@@ -19,7 +19,9 @@
   },
   "pnpm": {
     "overrides": {
-      "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10"
+      "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
+      "fast-jwt": ">=6.2.1",
+      "axios": ">=1.15.0"
     }
   }
 }
