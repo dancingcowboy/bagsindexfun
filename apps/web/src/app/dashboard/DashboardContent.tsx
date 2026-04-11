@@ -345,6 +345,18 @@ export default function DashboardPage() {
             </h1>
             <div className="flex gap-3">
               <button
+                onClick={() => {
+                  setPortfolioLive(true)
+                  setTimeout(() => refetchPortfolio(), 0)
+                }}
+                disabled={portfolioFetching}
+                className="flex items-center gap-2 rounded-lg border border-amber-400/60 bg-amber-400/10 px-4 py-2 text-sm font-bold uppercase tracking-wide text-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.25)] transition hover:bg-amber-400/20 hover:shadow-[0_0_28px_rgba(251,191,36,0.4)] disabled:opacity-50"
+                title="Fetch latest on-chain holdings"
+              >
+                <RefreshCw className={`h-4 w-4 ${portfolioFetching ? 'animate-spin' : ''}`} />
+                {portfolioFetching ? 'Loading…' : 'Load Holdings'}
+              </button>
+              <button
                 onClick={() => setShowDeposit(true)}
                 className="btn-primary flex items-center gap-2 text-sm"
               >
