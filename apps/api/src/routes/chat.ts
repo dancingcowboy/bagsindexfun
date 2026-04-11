@@ -214,6 +214,10 @@ export async function chatRoutes(app: FastifyInstance) {
       forwardedFromId = forwardOrigin.sender_user?.id
     }
 
+    app.log.info(
+      { mapping: !!mapping, forwardedFromId, hasToken: !!TELEGRAM_BOT_TOKEN },
+      '[chat/webhook] reply-back resolution',
+    )
     if (forwardedFromId && TELEGRAM_BOT_TOKEN) {
       try {
         const res = await fetch(
@@ -227,7 +231,8 @@ export async function chatRoutes(app: FastifyInstance) {
             }),
           },
         )
-        const data = (await res.json()) as { ok?: boolean; description?: string }
+        const data = (await res.json()) as { ok?: boolean; description?: string; result?: { message_id?: number } }
+        app.log.info({ data }, '[chat/webhook] sendMessage result')
         if (!data.ok) {
           app.log.error({ data }, 'Failed to deliver group reply to DM sender')
           // Let the admin know their reply didn't land, threaded under
