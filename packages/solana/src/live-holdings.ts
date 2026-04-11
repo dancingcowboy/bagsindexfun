@@ -1,12 +1,9 @@
 import { getTokenBalances } from './helius.js'
-import { getBagsSolValue } from './bags.js'
-import { getJupiterSolValue } from './jupiter-swap.js'
 import { getDexVolumes } from './dexscreener.js'
 import { getJupiterPrices } from './jupiter.js'
 import { getNativeSolBalance } from './connection.js'
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112'
-const LAMPORTS_PER_SOL = 1_000_000_000
 
 export interface LiveHolding {
   tokenMint: string
@@ -25,15 +22,17 @@ export interface LiveHoldingsResult {
 }
 
 /**
- * Live-read a wallet's holdings from on-chain state, priced against SOL
- * via Bags (primary) → DexScreener → Jupiter fallback. No DB dependency —
- * this is the source of truth for "what does this wallet actually hold
- * and what's it worth right now".
+ * Live-read a wallet's holdings from on-chain state, priced against SOL.
+ * No DB dependency — this is the source of truth for "what does this
+ * wallet actually hold and what's it worth right now".
  *
- * - Amounts come from Helius enhanced API (`/balances`)
- * - Prices come from Bags `/trade/quote` (wSOL out) first; if Bags has no
- *   route we convert DexScreener's priceUsd, then Jupiter's usdPrice,
- *   using Jupiter's own WSOL usdPrice for SOL/USD
+ * - Amounts: Helius enhanced API (`/balances`)
+ * - Prices: DexScreener batch (free, unlimited, covers the whole Solana
+ *   DEX graph in one request) → Jupiter batch as fallback for anything
+ *   Dex doesn't index. We deliberately skip Bags `/trade/quote` in the
+ *   hot path — it's per-mint and rate-limited, and any Bags pair is
+ *   already a DEX pair so Dex covers it. Bags is only used for building
+ *   actual swap transactions, not for valuation.
  * - Zero-balance mints are filtered out
  */
 export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldingsResult> {
@@ -68,51 +67,24 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
     const decimals = t.decimals
     const whole = Number(amountBig) / 10 ** decimals
 
-    // Price cascade: Bags → DexScreener → Jupiter (batch) → Jupiter (quote).
-    // DexScreener is free with no meaningful rate limit, so we try it before
-    // Jupiter to avoid burning Jupiter API quota on pricing.
+    // Price cascade: DexScreener batch → Jupiter batch. Both are already
+    // fetched once above, so this loop issues zero network calls.
     let priceSol = 0
     let source: LiveHolding['source'] = 'none'
-    try {
-      const probe = (10n ** BigInt(decimals)).toString()
-      const lamports = await getBagsSolValue(t.mint, probe)
-      if (lamports !== null) {
-        priceSol = Number(lamports) / LAMPORTS_PER_SOL
-        source = 'bags'
-      }
-    } catch {
-      // fall through
-    }
 
-    // DexScreener USD → SOL (already batch-fetched, no extra request)
-    if (priceSol === 0 && solUsd > 0) {
-      const usd = Number(dexPrices.get(t.mint)?.priceUsd ?? 0)
-      if (usd > 0) {
-        priceSol = usd / solUsd
+    if (solUsd > 0) {
+      const dexUsd = Number(dexPrices.get(t.mint)?.priceUsd ?? 0)
+      if (dexUsd > 0) {
+        priceSol = dexUsd / solUsd
         source = 'dex'
       }
     }
 
-    // Jupiter batch price (already fetched, no extra request)
     if (priceSol === 0 && solUsd > 0) {
-      const usd = Number(jupPrices.get(t.mint)?.usdPrice ?? 0)
-      if (usd > 0) {
-        priceSol = usd / solUsd
+      const jupUsd = Number(jupPrices.get(t.mint)?.usdPrice ?? 0)
+      if (jupUsd > 0) {
+        priceSol = jupUsd / solUsd
         source = 'jupiter'
-      }
-    }
-
-    // Last resort: per-token Jupiter quote (costs 1 API request each)
-    if (priceSol === 0) {
-      try {
-        const probe = (10n ** BigInt(decimals)).toString()
-        const jLamports = await getJupiterSolValue(t.mint, probe)
-        if (jLamports !== null) {
-          priceSol = Number(jLamports) / LAMPORTS_PER_SOL
-          source = 'jupiter'
-        }
-      } catch {
-        // fall through
       }
     }
 
