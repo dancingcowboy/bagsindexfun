@@ -37,6 +37,10 @@ export async function portfolioRoutes(app: FastifyInstance) {
         string,
         Awaited<ReturnType<typeof import('@bags-index/solana').getLiveHoldings>> | null
       >()
+      // Native SOL per wallet — fetched in the DB-fallback path so the
+      // 12% SOL anchor on CONSERVATIVE (and any un-redeployed sell proceeds)
+      // is not silently excluded from totalValueSol.
+      const nativeSolByAddress = new Map<string, number>()
       if (wantsLive) {
         const { getLiveHoldings } = await import('@bags-index/solana')
         await Promise.all(
@@ -46,6 +50,18 @@ export async function portfolioRoutes(app: FastifyInstance) {
             } catch (err) {
               app.log.warn({ err, wallet: w.address }, '[portfolio] live fetch failed')
               liveByAddress.set(w.address, null)
+            }
+          }),
+        )
+      } else {
+        const { getNativeSolBalance } = await import('@bags-index/solana')
+        await Promise.all(
+          wallets.map(async (w) => {
+            try {
+              nativeSolByAddress.set(w.address, await getNativeSolBalance(w.address))
+            } catch (err) {
+              app.log.warn({ err, wallet: w.address }, '[portfolio] native SOL fetch failed')
+              nativeSolByAddress.set(w.address, 0)
             }
           }),
         )
@@ -106,11 +122,15 @@ export async function portfolioRoutes(app: FastifyInstance) {
 
         // Fallback to DB if live read failed.
         const tokenValueSol = w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
+        // Include native SOL (fetched above for the non-live path, or zero if
+        // the balance read failed). Only count it when the wallet holds tokens
+        // — an empty wallet's gas reserve is not user value.
+        const nativeSol = w.holdings.length > 0 ? (nativeSolByAddress.get(w.address) ?? 0) : 0
         return {
           riskTier: w.riskTier,
           walletAddress: w.address,
-          totalValueSol: tokenValueSol.toFixed(9),
-          nativeSol: '0',
+          totalValueSol: (tokenValueSol + nativeSol).toFixed(9),
+          nativeSol: nativeSol.toFixed(9),
           holdings: w.holdings.map((h) => {
             const meta = metaByMint.get(h.tokenMint)
             return {

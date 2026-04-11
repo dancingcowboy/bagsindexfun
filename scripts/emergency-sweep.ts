@@ -137,6 +137,35 @@ async function sweepWallet(
     })
     result.solReturned = Number(sendable) / LAMPORTS_PER_SOL
     console.log(`      ✓ returned ${result.solReturned} SOL · ${sig.slice(0, 16)}…`)
+
+    // Accounting cleanup — without this, /portfolio/pnl still counts the
+    // old deposits as live cost basis and any re-deposit stacks on top,
+    // producing phantom unrealized losses on the dashboard.
+    //   1. Record a Withdrawal row (status=CONFIRMED) for the swept SOL
+    //   2. Delete Holding rows for this sub-wallet (tokens are gone)
+    //   3. Zero realizedPnlSol so the next cycle starts from a clean slate
+    const swRow = await db.subWallet.findUnique({
+      where: { id: sw.id },
+      select: { riskTier: true },
+    })
+    if (swRow) {
+      await db.withdrawal.create({
+        data: {
+          userId: sw.user.id,
+          riskTier: swRow.riskTier,
+          amountSol: result.solReturned.toFixed(9),
+          feeSol: '0',
+          txSignature: sig,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+        },
+      })
+      await db.holding.deleteMany({ where: { subWalletId: sw.id } })
+      await db.subWallet.update({
+        where: { id: sw.id },
+        data: { realizedPnlSol: '0' },
+      })
+    }
   } catch (err) {
     result.error = String(err)
     console.error(`      ✗ wallet failed: ${err}`)

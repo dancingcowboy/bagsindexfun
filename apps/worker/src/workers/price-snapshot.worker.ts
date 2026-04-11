@@ -81,6 +81,14 @@ export async function processSnapshot(_job?: Job) {
       updatedHoldings++
     }
 
+    // Native SOL sitting in the sub-wallet is real user value (the 12% SOL
+    // anchor on CONSERVATIVE, plus any sell proceeds not yet redeployed).
+    // Without this, the PnlSnapshot history understates vault value and
+    // every dashboard chart reads low.
+    if (live && wallet.holdings.length > 0) {
+      totalValueSol += live.nativeSol
+    }
+
     const unrealizedSol = totalValueSol - totalCostSol
 
     await db.pnlSnapshot.create({
