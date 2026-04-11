@@ -131,6 +131,16 @@ export const LAMPORTS_PER_SOL = 1_000_000_000
  *  token positions and a sell transaction can't pay its fee. */
 export const WALLET_RESERVE_SOL = 0.05
 
+/** Estimated gas cost for a single Bags fee-claim tx (no Jito tip, base
+ *  fee + priority fee as built by Bags). A position can return up to 2
+ *  legs (virtual-pool + DAMM), so worst-case gas per position is 2x. */
+export const FEE_CLAIM_GAS_PER_TX_LAMPORTS = 15_000n
+
+/** Minimum claimable-to-gas ratio before we bother claiming a position.
+ *  3× gas means we only autoclaim when the fees are at least triple the
+ *  worst-case gas cost — otherwise the tx fee eats the reward. */
+export const FEE_CLAIM_MIN_MULTIPLE = 3n
+
 // ─── Swaps ───────────────────────────────────────────────────────────────────
 
 /** Default slippage for index rebalance swaps (3%) */

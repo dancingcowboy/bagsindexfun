@@ -13,6 +13,8 @@ import {
   QUEUE_DEPOSIT,
   LAMPORTS_PER_SOL,
   WALLET_RESERVE_SOL,
+  FEE_CLAIM_GAS_PER_TX_LAMPORTS,
+  FEE_CLAIM_MIN_MULTIPLE,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -74,11 +76,32 @@ async function processFeeClaim(_job: Job) {
     return
   }
 
+  // Skip positions where claimable fees wouldn't pay for the gas with
+  // enough headroom to be worth it. A Bags position can return up to 2
+  // claim txs (virtual-pool + DAMM), so the worst-case gas budget is
+  // 2 * FEE_CLAIM_GAS_PER_TX_LAMPORTS. Only claim if fees are at least
+  // FEE_CLAIM_MIN_MULTIPLE × that budget — otherwise the claim is a net
+  // negative and we'd rather let fees accrue until next run.
+  const minClaimableLamports =
+    FEE_CLAIM_MIN_MULTIPLE * FEE_CLAIM_GAS_PER_TX_LAMPORTS * 2n
   const withFees = positions.filter(
-    (p) => BigInt(p.totalClaimableLamportsUserShare || '0') > 0n,
+    (p) => BigInt(p.totalClaimableLamportsUserShare || '0') >= minClaimableLamports,
   )
+  const dustSkipped = positions.filter((p) => {
+    const c = BigInt(p.totalClaimableLamportsUserShare || '0')
+    return c > 0n && c < minClaimableLamports
+  })
+  if (dustSkipped.length > 0) {
+    const totalDust = dustSkipped.reduce(
+      (acc, p) => acc + BigInt(p.totalClaimableLamportsUserShare || '0'),
+      0n,
+    )
+    logger.info(
+      `[fee-claim] Skipping ${dustSkipped.length} sub-threshold position(s) (< ${(Number(minClaimableLamports) / LAMPORTS_PER_SOL).toFixed(6)} SOL each, ${(Number(totalDust) / LAMPORTS_PER_SOL).toFixed(6)} SOL total dust)`,
+    )
+  }
   if (withFees.length === 0) {
-    logger.info('[fee-claim] Nothing claimable — skipping')
+    logger.info('[fee-claim] Nothing claimable above threshold — skipping')
     return
   }
 
