@@ -116,7 +116,27 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const body = req.body as any
     const message = body?.message
-    if (!message) return { ok: true }
+    if (!message) {
+      app.log.info({ update: body }, '[chat/webhook] non-message update')
+      return { ok: true }
+    }
+
+    // TEMP DEBUG — log what we actually receive so we can diagnose the
+    // reply-back flow. Safe to strip once reply-back is confirmed.
+    app.log.info(
+      {
+        chatId: message.chat?.id,
+        chatType: message.chat?.type,
+        configuredChatId: TELEGRAM_CHAT_ID,
+        messageId: message.message_id,
+        hasReplyTo: !!message.reply_to_message,
+        replyToId: message.reply_to_message?.message_id,
+        replyToForwardFromId: message.reply_to_message?.forward_from?.id,
+        replyToForwardOrigin: message.reply_to_message?.forward_origin?.type,
+        textPreview: (message.text || '').slice(0, 80),
+      },
+      '[chat/webhook] received',
+    )
 
     // Case 1: DM to the bot — forward the raw message into the support
     // group and persist a mapping from the forwarded message's id in the
