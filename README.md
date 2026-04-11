@@ -266,6 +266,48 @@ See [`.env.example`](.env.example) for all required variables with inline docume
 - Audit log for all state-changing operations
 - Passed a 20-point pre-launch security audit
 
+## Emergency Sweep
+
+If the protocol ever needs to be wound down — planned sunset, critical bug, compromise, or any other scenario where users should get their funds out without waiting for the normal withdrawal pipeline — there's a standalone script that liquidates every sub-wallet and returns the resulting SOL to each user's connected wallet.
+
+**Location:** [`scripts/emergency-sweep.ts`](scripts/emergency-sweep.ts)
+
+**What it does, per sub-wallet:**
+1. Live-reads on-chain holdings (not the DB — so drift/reconcile gaps don't matter)
+2. Sells every SPL token back to SOL via the Bags trade API
+3. Transfers the resulting SOL to the user's `User.walletAddress` (the wallet they connected with)
+4. Leaves ~0.01 SOL behind per sub-wallet for rent/fees
+
+**Requirements** (can run from any laptop with network access):
+- `PRIVY_APP_ID` + `PRIVY_APP_SECRET` (for sub-wallet signing)
+- `DATABASE_URL` pointing at a reachable Postgres (or a restored snapshot)
+- `HELIUS_API_KEY` + `BAGS_API_KEY` (for quotes and on-chain reads)
+
+**Usage:**
+
+```bash
+# Dry run — prints the full plan, touches nothing
+pnpm tsx scripts/emergency-sweep.ts
+
+# Single user (smoke test before mass sweep)
+pnpm tsx scripts/emergency-sweep.ts --execute --user <userId>
+
+# Single sub-wallet
+pnpm tsx scripts/emergency-sweep.ts --execute --wallet <subWalletId>
+
+# Full protocol-wide sweep
+pnpm tsx scripts/emergency-sweep.ts --execute
+```
+
+**Safety rails built in:**
+- Dry run is the default — `--execute` required to send transactions
+- 5-second abort window before live execution starts
+- Per-wallet error isolation — one failed sell doesn't halt the sweep
+- Skips placeholder rows (`address LIKE 'pending-%'` from failed Privy provisioning)
+- Final summary reports wallets processed, sells ok/failed, total SOL returned, and a list of errored wallets
+
+**Recommended test cadence:** dry-run against production before every public-beta milestone, and at least once against a single test wallet end-to-end (`--execute --user <test-user-id>`) so the script stays in working order.
+
 ## License
 
 MIT
