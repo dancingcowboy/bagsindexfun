@@ -1,6 +1,5 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getBagsPools, getTokenFeed } from '@bags-index/solana'
 import { QUEUE_ANALYSIS, RISK_TIERS } from '@bags-index/shared'
 import type { RiskTier } from '@bags-index/shared'
 import type { AnalysisResult, TierAllocation } from '@bags-index/shared'
