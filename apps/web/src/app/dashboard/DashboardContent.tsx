@@ -708,7 +708,79 @@ export default function DashboardPage() {
                           </div>
                         )}
                       </div>
-                      <table className="w-full">
+                      {/* Mobile card layout */}
+                      <div className="md:hidden divide-y" style={{ borderColor: c.border }}>
+                        {tierHoldings.map((h: any) => (
+                          <div
+                            key={`${t.riskTier}:${h.tokenMint}:m`}
+                            className="px-4 py-3 space-y-2"
+                            style={{ borderColor: c.border }}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-sm">{h.tokenSymbol ?? '—'}</span>
+                                  {h.marketCapUsd > 0 && (
+                                    <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                                      ${h.marketCapUsd >= 1_000_000 ? (h.marketCapUsd / 1_000_000).toFixed(1) + 'M' : h.marketCapUsd >= 1_000 ? (h.marketCapUsd / 1_000).toFixed(0) + 'K' : h.marketCapUsd.toFixed(0)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                                  {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="font-[family-name:var(--font-mono)] text-sm">
+                                  {Number(h.valueSol).toFixed(4)} SOL
+                                </div>
+                                <span
+                                  className="font-[family-name:var(--font-mono)] text-xs"
+                                  style={{ color: c.text }}
+                                >
+                                  {h.allocationPct}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/30">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${h.allocationPct}%`,
+                                    background: c.chip,
+                                  }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <a
+                                  href={`https://dexscreener.com/solana/${h.tokenMint}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                                >
+                                  dex
+                                </a>
+                                <CopyCAButton mint={h.tokenMint} />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {nativeSol > 0.001 && (
+                          <div className="px-4 py-3 flex items-center justify-between" style={{ borderColor: c.border }}>
+                            <div>
+                              <div className="font-semibold text-sm text-[var(--color-text-muted)]">SOL</div>
+                              <div className="text-[10px] text-[var(--color-text-muted)]">gas reserve</div>
+                            </div>
+                            <div className="font-[family-name:var(--font-mono)] text-sm text-[var(--color-text-muted)]">
+                              {nativeSol.toFixed(4)} SOL
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {/* Desktop table layout */}
+                      <table className="hidden md:table w-full">
                         <thead>
                           <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
                             <th className="px-5 py-2 text-left font-medium">Token</th>

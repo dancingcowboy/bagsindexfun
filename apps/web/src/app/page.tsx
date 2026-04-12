@@ -797,8 +797,56 @@ function ProtocolVaultSection() {
           </div>
 
           {/* Holdings table — mirrors dashboard */}
-          {data.holdings.length > 0 && (
-            <table className="w-full">
+          {data.holdings.length > 0 && (<>
+            {/* Mobile card layout */}
+            <div className="md:hidden divide-y divide-[var(--color-border)]">
+              {data.holdings.map((h: any) => (
+                <div key={`${h.tokenMint}:m`} className="px-4 py-3 space-y-2">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{h.tokenSymbol}</span>
+                        <span className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                          {formatMC(h.marketCapUsd)}
+                        </span>
+                      </div>
+                      <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                        {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-[family-name:var(--font-mono)] text-sm">
+                        {Number(h.valueSolEst).toFixed(4)} SOL
+                      </div>
+                      <span className="font-[family-name:var(--font-mono)] text-xs" style={{ color: '#00D62B' }}>
+                        {h.weightPct}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/30">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${h.weightPct}%`, background: '#00D62B' }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <a
+                        href={`https://dexscreener.com/solana/${h.tokenMint}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                      >
+                        dex
+                      </a>
+                      <VaultCopyCAButton mint={h.tokenMint} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Desktop table layout */}
+            <table className="hidden md:table w-full">
               <thead>
                 <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
                   <th className="px-5 py-2 text-left font-medium">Token</th>
@@ -863,7 +911,7 @@ function ProtocolVaultSection() {
                 ))}
               </tbody>
             </table>
-          )}
+          </>)}
 
           {data.holdings.length === 0 && (
             <div className="px-6 py-8 text-center text-sm text-[var(--color-text-muted)]">
