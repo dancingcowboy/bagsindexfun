@@ -106,10 +106,13 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
     let text = lines.join('\n')
     if (text.length > 275) text = text.slice(0, 272) + '…'
 
+    console.log(`[rebalance-tweet] posting ${tier} (${text.length} chars)`)
     const twitterId = await postTweet(text)
+    console.log(`[rebalance-tweet] tweet sent ${tier} id=${twitterId}`)
     await mirrorTweetToTelegram(text, twitterId)
     console.log(`[rebalance-tweet] posted ${tier} ${twitterId}`)
-  } catch (err) {
-    console.error('[rebalance-tweet] failed:', err)
+  } catch (err: any) {
+    const detail = err?.data ? JSON.stringify(err.data) : err?.message ?? String(err)
+    console.error(`[rebalance-tweet] failed: ${detail}`)
   }
 }
