@@ -211,11 +211,58 @@ const CHART_COLORS = [
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
+interface AnalysisApiResponse {
+  data: {
+    id: string
+    createdAt: string
+    model: string
+    durationMs: number
+    summary: string
+    sentiment: string
+    keyInsights: string[]
+    reasoning: string
+    tiers: Record<string, {
+      tokenMint: string
+      tokenSymbol: string
+      tokenName: string
+      weightPct: number
+      reasoning: string
+      confidence: string
+      signals: string[]
+    }[]>
+  } | null
+}
+
 export function AgentAnalysis() {
-  const analysis = MOCK_ANALYSIS
   const { tier: activeTier, setTier: setActiveTier } = useTier()
   const [showFullReasoning, setShowFullReasoning] = useState(false)
   const [expandedToken, setExpandedToken] = useState<string | null>(null)
+
+  // Fetch latest AI analysis (reasoning, sentiment, per-token insights)
+  const analysisQ = useQuery({
+    queryKey: ['analysis-latest'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/analysis/latest`)
+      if (!res.ok) throw new Error(`${res.status}`)
+      return (await res.json()) as AnalysisApiResponse
+    },
+    refetchInterval: 10 * 60_000,
+  })
+
+  const analysis = useMemo(() => {
+    const d = analysisQ.data?.data
+    if (!d) return MOCK_ANALYSIS
+    return {
+      id: d.id,
+      createdAt: d.createdAt,
+      model: d.model,
+      durationMs: d.durationMs,
+      sentiment: (d.sentiment || 'neutral') as keyof typeof SENTIMENT_CONFIG,
+      summary: d.summary || MOCK_ANALYSIS.summary,
+      keyInsights: d.keyInsights?.length ? d.keyInsights : MOCK_ANALYSIS.keyInsights,
+      reasoning: d.reasoning || MOCK_ANALYSIS.reasoning,
+    }
+  }, [analysisQ.data])
 
   // Fetch live index data from the API for the active tier
   const liveQ = useQuery({
@@ -240,21 +287,42 @@ export function AgentAnalysis() {
     refetchInterval: 5 * 60_000,
   })
 
-  // Build allocations from live API data; fall back to mock when loading
+  // Build allocations: live index weights + analysis reasoning per token
   const allocations: (Allocation & { marketCapUsd?: number })[] = useMemo(() => {
+    const analysisTier = analysisQ.data?.data?.tiers?.[activeTier] ?? []
+    const reasoningByMint = new Map(
+      analysisTier.map((a) => [a.tokenMint, { reasoning: a.reasoning, confidence: a.confidence, signals: a.signals }])
+    )
+
     const liveTokens = liveQ.data?.data?.tokens
-    if (!liveTokens?.length) return MOCK_TIERS[activeTier]
-    return liveTokens.map((t) => ({
-      tokenSymbol: t.tokenSymbol,
-      tokenName: t.tokenName,
-      tokenMint: t.tokenMint,
-      weightPct: Number(t.weightPct),
-      marketCapUsd: t.marketCapUsd,
-      reasoning: '',
-      confidence: 'medium',
-      signals: [],
-    }))
-  }, [liveQ.data, activeTier])
+    if (!liveTokens?.length) {
+      if (analysisTier.length) {
+        return analysisTier.map((a) => ({
+          tokenSymbol: a.tokenSymbol,
+          tokenName: a.tokenName,
+          tokenMint: a.tokenMint,
+          weightPct: a.weightPct,
+          reasoning: a.reasoning,
+          confidence: a.confidence,
+          signals: a.signals,
+        }))
+      }
+      return MOCK_TIERS[activeTier]
+    }
+    return liveTokens.map((t) => {
+      const r = reasoningByMint.get(t.tokenMint)
+      return {
+        tokenSymbol: t.tokenSymbol,
+        tokenName: t.tokenName,
+        tokenMint: t.tokenMint,
+        weightPct: Number(t.weightPct),
+        marketCapUsd: t.marketCapUsd,
+        reasoning: r?.reasoning ?? '',
+        confidence: r?.confidence ?? 'medium',
+        signals: r?.signals ?? [],
+      }
+    })
+  }, [liveQ.data, analysisQ.data, activeTier])
 
   const sentimentCfg = SENTIMENT_CONFIG[analysis.sentiment]
   const SentimentIcon = sentimentCfg.icon
