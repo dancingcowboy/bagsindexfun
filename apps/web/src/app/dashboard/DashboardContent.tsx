@@ -160,7 +160,7 @@ export default function DashboardPage() {
     refetchInterval: 60_000,
   })
 
-  const { data: pnlData } = useQuery({
+  const { data: pnlData, isLoading: pnlLoading } = useQuery({
     queryKey: ['pnl'],
     queryFn: () => api.getPnl(),
     enabled: authenticated,
@@ -427,7 +427,7 @@ export default function DashboardPage() {
         </motion.div>
 
         {/* Pool PnL */}
-        {pnlData?.data?.tiers && pnlData.data.tiers.length > 0 && (
+        {(pnlLoading || (pnlData?.data?.tiers && pnlData.data.tiers.length > 0)) && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -438,42 +438,62 @@ export default function DashboardPage() {
               Pool PnL
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {pnlData.data.tiers.map((t: any) => {
-                const value = Number(t.currentValueSol)
-                const cost = Number(t.costBasisSol)
-                const openPnl = value - cost
-                const pct = cost > 0 ? (openPnl / cost) * 100 : 0
-                const positive = openPnl >= 0
-                return (
-                  <div key={t.riskTier} className="card">
-                    <div className="text-sm text-[var(--color-text-muted)] mb-1">{t.riskTier}</div>
-                    <div className={`font-[family-name:var(--font-display)] text-2xl font-bold ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
-                      {positive ? '+' : ''}{openPnl.toFixed(4)} SOL
-                    </div>
-                    <div className={`text-sm ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
-                      {positive ? '+' : ''}{pct.toFixed(2)}%
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--color-text-muted)]">
-                      <div>
-                        <div>Value</div>
-                        <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.currentValueSol).toFixed(4)}</div>
-                      </div>
-                      <div>
-                        <div>Cost</div>
-                        <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.costBasisSol).toFixed(4)}</div>
-                      </div>
-                      <div>
-                        <div>Realized</div>
-                        <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.realizedSol).toFixed(4)}</div>
-                      </div>
-                      <div>
-                        <div>Unrealized</div>
-                        <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.unrealizedSol).toFixed(4)}</div>
+              {pnlLoading && !pnlData ? (
+                <>
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="card animate-pulse">
+                      <div className="h-4 w-24 rounded bg-white/10 mb-2" />
+                      <div className="h-8 w-36 rounded bg-white/10 mb-1" />
+                      <div className="h-4 w-16 rounded bg-white/10" />
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {[0, 1, 2, 3].map((j) => (
+                          <div key={j}>
+                            <div className="h-3 w-12 rounded bg-white/10 mb-1" />
+                            <div className="h-4 w-16 rounded bg-white/10" />
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
-                )
-              })}
+                  ))}
+                </>
+              ) : (
+                pnlData?.data?.tiers?.map((t: any) => {
+                  const value = Number(t.currentValueSol)
+                  const cost = Number(t.costBasisSol)
+                  const openPnl = value - cost
+                  const pct = cost > 0 ? (openPnl / cost) * 100 : 0
+                  const positive = openPnl >= 0
+                  return (
+                    <div key={t.riskTier} className="card">
+                      <div className="text-sm text-[var(--color-text-muted)] mb-1">{t.riskTier}</div>
+                      <div className={`font-[family-name:var(--font-display)] text-2xl font-bold ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
+                        {positive ? '+' : ''}{openPnl.toFixed(4)} SOL
+                      </div>
+                      <div className={`text-sm ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
+                        {positive ? '+' : ''}{pct.toFixed(2)}%
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--color-text-muted)]">
+                        <div>
+                          <div>Value</div>
+                          <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.currentValueSol).toFixed(4)}</div>
+                        </div>
+                        <div>
+                          <div>Cost</div>
+                          <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.costBasisSol).toFixed(4)}</div>
+                        </div>
+                        <div>
+                          <div>Realized</div>
+                          <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.realizedSol).toFixed(4)}</div>
+                        </div>
+                        <div>
+                          <div>Unrealized</div>
+                          <div className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">{Number(t.unrealizedSol).toFixed(4)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
             </div>
           </motion.div>
         )}
