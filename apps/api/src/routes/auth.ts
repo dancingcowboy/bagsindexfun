@@ -29,10 +29,10 @@ export async function authRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'No wallet linked to Privy account' })
       }
 
-      // Launch allowlist — only the deployer wallet and admin wallets can sign
-      // in until public launch. Everyone else gets WALLET_NOT_ALLOWED so the
-      // frontend can show the "coming soon" screen.
-      const allowed = new Set(
+      // Launch allowlist — env vars (LAUNCH_ALLOWED_WALLETS, ADMIN_WALLETS)
+      // and DB whitelist table both grant access. Everyone else gets
+      // WALLET_NOT_ALLOWED so the frontend shows "coming soon".
+      const envAllowed = new Set(
         [
           ...(process.env.LAUNCH_ALLOWED_WALLETS || '').split(','),
           ...(process.env.ADMIN_WALLETS || '').split(','),
@@ -40,8 +40,12 @@ export async function authRoutes(app: FastifyInstance) {
           .map((w) => w.trim())
           .filter(Boolean),
       )
-      if (allowed.size > 0 && !allowed.has(walletAddress)) {
-        app.log.warn({ walletAddress, allowed: [...allowed] }, 'WALLET_NOT_ALLOWED')
+      const dbWhitelisted = await db.walletWhitelist.findUnique({
+        where: { walletAddress },
+        select: { id: true },
+      })
+      if (envAllowed.size > 0 && !envAllowed.has(walletAddress) && !dbWhitelisted) {
+        app.log.warn({ walletAddress }, 'WALLET_NOT_ALLOWED')
         return reply.status(403).send({ error: 'WALLET_NOT_ALLOWED' })
       }
 
