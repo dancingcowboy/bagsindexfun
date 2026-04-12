@@ -12,13 +12,40 @@ Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 
 
 **Categories:** Bags API · Fee Sharing · AI Agents · Claude Skills
 
-### Deep Bags integration
+### Deep Bags API integration
 
-bags-index isn't just *built on* Bags — it plugs into the Bags stack in three places at once:
+bags-index isn't just *built on* Bags — the Bags API is the primary data source and swap venue for the entire protocol. Every dollar that flows through the system touches at least two Bags endpoints. We use six Bags API endpoints across four categories:
 
-1. **Bags API for discovery** — token universe pulled live from `/token-launch/feed`, MIGRATED tokens only
-2. **Native Bags swaps** — every allocation, rebalance, and liquidation routes through `/trade/quote` + `/trade/swap`, signed by Privy and submitted on-chain
-3. **Bags fee sharing** — the protocol registers fee-share vaults on Bags tokens, auto-claims the creator fee split, and routes claimed SOL straight back into the index pipeline
+**Token discovery**
+- `GET /token-launch/feed` — the scoring worker pulls the full token universe from Bags every cycle, filtering to `status === 'MIGRATED'` for tradeable tokens
+- `GET /solana/bags/pools?onlyMigrated=true` — the scoring worker fetches the complete Bags pool list to map tokens to their on-chain DAMM v2 pools
+
+**Swap execution (primary venue)**
+- `GET /trade/quote` — every deposit allocation, rebalance sell/buy, withdrawal liquidation, and tier switch starts with a Bags quote
+- `POST /trade/swap` — the quote response feeds directly into the swap builder, which returns a signed VersionedTransaction ready for on-chain submission
+
+Every swap in the system — deposits fanning out into 11 positions, withdrawals liquidating entire portfolios, rebalances adjusting hundreds of wallets — routes through Bags first. This makes the Bags API the highest-traffic integration in the stack.
+
+**Fee claiming**
+- `GET /token-launch/claimable-positions` — the fee-claim worker reads accrued trading fees across all Bags tokens the vault is registered on
+- `POST /token-launch/claim-txs/v3` — builds unsigned claim transactions for each position; the worker signs them via Privy HSM and submits on-chain
+
+**Valuation**
+- `GET /trade/quote` (reused) — the hourly price-snapshot worker probes Bags for each tracked token's SOL value by quoting a sell of one unit. Results are cached for 60 seconds to avoid redundant calls when multiple dashboard loads overlap.
+
+#### Rate-limit handling and Jupiter fallback
+
+The Bags API enforces a hard **1,000 requests/hour** quota that resets at the top of each hour. For a protocol that rebalances hundreds of wallets across three tiers — each rebalance potentially generating 10+ quote/swap pairs per wallet — this limit is a real constraint.
+
+We handle it with a three-layer strategy:
+
+1. **Quota tracking** — When Bags returns a 429 with `remaining: 0`, the client caches the `resetTime` and short-circuits all subsequent requests until the quota resets. No wasted round-trips during a drained window.
+
+2. **Request pacing** — Deposit and withdrawal workers insert 2-second gaps between swaps. The price-snapshot worker adds 100ms gaps between valuation probes. Rebalances spread wallets into batches of 25 with hourly staggering via BullMQ delayed jobs, so a 200-wallet tier doesn't fire 200 wallets worth of swaps in one burst.
+
+3. **Automatic Jupiter v6 fallback** — When Bags is rate-limited (429), returns a server error (5xx), or is unreachable (network error), the swap router transparently falls back to Jupiter's aggregator (`api.jup.ag/swap/v1/quote` + `/swap`). This ensures deposits and withdrawals never silently become no-ops during high-traffic periods. The fallback is logged and the route (`BAGS` or `JUPITER`) is recorded on every `SwapExecution` row for post-hoc attribution.
+
+The goal is to maximize Bags API usage — it's the preferred venue — while ensuring the protocol stays operational under load. The Jupiter fallback is a reliability layer, not a routing preference.
 
 $BAGSX itself is a Bags-launched token, so platform-token exposure is fully native to the ecosystem.
 
