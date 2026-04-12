@@ -44,6 +44,12 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     include: { holdings: true },
   })
   if (!subWallet) throw new Error(`Sub-wallet ${subWalletId} not found`)
+  if (subWallet.userId !== userId) {
+    throw new Error(`Sub-wallet ${subWalletId} does not belong to user ${userId}`)
+  }
+  if (subWallet.riskTier !== withdrawal.riskTier) {
+    throw new Error(`Sub-wallet tier ${subWallet.riskTier} does not match withdrawal tier ${withdrawal.riskTier}`)
+  }
 
   // Idempotent re-run: skip tokens that were already sold in a prior attempt.
   const priorSells = await db.swapExecution.findMany({
