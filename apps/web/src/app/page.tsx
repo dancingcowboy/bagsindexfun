@@ -15,7 +15,7 @@ import {
   Zap,
   AlertTriangle,
 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, API_BASE } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
 import { NextCycleCountdown } from '@/components/NextCycleCountdown'
@@ -565,6 +565,9 @@ export default function LandingPage() {
         </p>
       </section>
 
+      {/* ─── Protocol Vault ──────────────────────────────────────────── */}
+      <ProtocolVaultSection />
+
       {/* ─── Built With ───────────────────────────────────────────────── */}
       <section className="mx-auto max-w-7xl px-6 py-24 text-center">
         <h2 className="text-3xl font-bold mb-4">Powered By</h2>
@@ -704,5 +707,119 @@ export default function LandingPage() {
       </footer>
     </div>
     </TierProvider>
+  )
+}
+
+/* ─── Protocol Vault Card ─────────────────────────────────────────────────── */
+
+function ProtocolVaultSection() {
+  const vault = useQuery<any>({
+    queryKey: ['protocol-vault'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/index/vault`)
+      const json = await res.json()
+      if (!json.success || !json.data) return null
+      return json.data
+    },
+    staleTime: 60_000,
+  })
+
+  const data = vault.data
+  if (!data) return null
+
+  return (
+    <section className="mx-auto max-w-7xl px-6 py-24">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.5 }}
+      >
+        <h2 className="text-3xl font-bold text-center mb-3">Protocol Vault</h2>
+        <p className="text-center text-[var(--color-text-secondary)] mb-10 text-sm max-w-xl mx-auto">
+          Platform fees are auto-deposited into the Balanced index. This vault eats its own cooking.
+        </p>
+
+        <div className="mx-auto max-w-3xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] overflow-hidden">
+          {/* Header stats */}
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+                Vault Value
+              </div>
+              <div className="text-2xl font-bold font-[family-name:var(--font-mono)]">
+                {Number(data.totalValueSol).toFixed(4)}{' '}
+                <span className="text-sm text-[var(--color-text-muted)]">SOL</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+                Fees Claimed
+              </div>
+              <div className="font-[family-name:var(--font-mono)] text-lg font-semibold">
+                {Number(data.totalClaimedSol).toFixed(4)}{' '}
+                <span className="text-sm text-[var(--color-text-muted)]">SOL</span>
+              </div>
+              <div className="text-[10px] text-[var(--color-text-muted)]">
+                {data.claimCount} deposit{data.claimCount !== 1 ? 's' : ''}
+              </div>
+            </div>
+          </div>
+
+          {/* Holdings table */}
+          {data.holdings.length > 0 && (
+            <table className="w-full">
+              <thead>
+                <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
+                  <th className="px-6 py-2 text-left font-medium">Token</th>
+                  <th className="px-6 py-2 text-right font-medium">Value (SOL)</th>
+                  <th className="px-6 py-2 text-right font-medium">Weight</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.holdings.map((h: any) => (
+                  <tr
+                    key={h.tokenMint}
+                    className="border-t border-[var(--color-border)] hover:bg-white/[0.02]"
+                  >
+                    <td className="px-6 py-3 text-sm">
+                      <div className="font-semibold">{h.tokenSymbol}</div>
+                      <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
+                        {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
+                      {Number(h.valueSolEst).toFixed(4)}
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="h-2 w-16 overflow-hidden rounded-full bg-black/30">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${h.weightPct}%`,
+                              background: '#00D62B',
+                            }}
+                          />
+                        </div>
+                        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)] w-10 text-right">
+                          {h.weightPct}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {data.holdings.length === 0 && (
+            <div className="px-6 py-8 text-center text-sm text-[var(--color-text-muted)]">
+              No holdings yet — vault will populate after first fee claim.
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </section>
   )
 }

@@ -492,4 +492,90 @@ export async function indexInfoRoutes(app: FastifyInstance) {
     },
   )
 
+  /**
+   * GET /index/vault — public protocol vault summary.
+   * Shows BALANCED tier holdings, total value, and claim stats.
+   * No auth required — this powers the landing page vault card.
+   */
+  app.get('/vault', async (_req, reply) => {
+    try {
+      const user = await db.user.findUnique({
+        where: { privyUserId: 'system:protocol-vault' },
+        include: {
+          subWallets: {
+            where: { riskTier: 'BALANCED' },
+            include: { holdings: true },
+          },
+        },
+      })
+      if (!user) return { success: true, data: null }
+
+      const sw = user.subWallets[0]
+      if (!sw) return { success: true, data: null }
+
+      // Resolve token symbols
+      const mints = sw.holdings.map((h) => h.tokenMint)
+      const scores = mints.length
+        ? await db.tokenScore.findMany({
+            where: { tokenMint: { in: mints } },
+            orderBy: { scoredAt: 'desc' },
+            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+          })
+        : []
+      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      for (const s of scores) {
+        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+      }
+
+      const tokenValueSol = sw.holdings.reduce((s, h) => s + Number(h.valueSolEst || 0), 0)
+
+      // Claim stats from audit log
+      const claimCount = await db.auditLog.count({ where: { action: 'VAULT_FEE_CLAIM' } })
+      const claimLogs = await db.auditLog.findMany({
+        where: { action: 'VAULT_FEE_CLAIM' },
+        select: { resource: true },
+      })
+      const claimDepositIds = claimLogs
+        .map((l) => (l.resource ?? '').replace(/^deposit:/, ''))
+        .filter(Boolean)
+      const totalClaimedSol = claimDepositIds.length
+        ? (await db.deposit.aggregate({
+            where: { id: { in: claimDepositIds }, userId: user.id },
+            _sum: { amountSol: true },
+          }))._sum.amountSol
+        : null
+
+      return {
+        success: true,
+        data: {
+          tier: 'BALANCED',
+          totalValueSol: tokenValueSol.toFixed(6),
+          totalClaimedSol: Number(totalClaimedSol ?? 0).toFixed(6),
+          claimCount,
+          holdings: sw.holdings
+            .map((h) => {
+              const meta = metaByMint.get(h.tokenMint)
+              return {
+                tokenMint: h.tokenMint,
+                tokenSymbol: meta?.symbol ?? h.tokenMint.slice(0, 6),
+                tokenName: meta?.name ?? null,
+                valueSolEst: Number(h.valueSolEst || 0).toFixed(6),
+                weightPct: 0, // filled below
+              }
+            })
+            .sort((a, b) => Number(b.valueSolEst) - Number(a.valueSolEst))
+            .map((h) => ({
+              ...h,
+              weightPct: tokenValueSol > 0
+                ? ((Number(h.valueSolEst) / tokenValueSol) * 100).toFixed(1)
+                : '0',
+            })),
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to load public vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
 }
