@@ -73,8 +73,9 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
       },
     })
 
-    // Max 3 cashtags per tweet — use them on the top 3 for cross-pollination.
-    const top3 = tierScores.slice(0, 3).map((s) => `$${s.tokenSymbol}`).join(' · ')
+    // Twitter limits tweets to 1 cashtag — use it on the #1 pick.
+    const top3Symbols = tierScores.slice(0, 3).map((s) => s.tokenSymbol)
+    const top3 = `$${top3Symbols[0]} · ${top3Symbols[1]} · ${top3Symbols[2]}`
     const prevMints = new Set((prevCycle?.scores ?? []).map((s) => s.tokenMint))
     const currentMints = new Set(tierScores.map((s) => s.tokenMint))
     const added = tierScores.filter((s) => !prevMints.has(s.tokenMint)).slice(0, 2)

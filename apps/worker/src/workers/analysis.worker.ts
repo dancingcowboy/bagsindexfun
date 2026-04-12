@@ -1,7 +1,8 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getBagsPools, getTokenFeed, getHolderCount, getDexVolumes } from '@bags-index/solana'
+import { getBagsPools, getTokenFeed } from '@bags-index/solana'
 import { QUEUE_ANALYSIS, RISK_TIERS } from '@bags-index/shared'
+import type { RiskTier } from '@bags-index/shared'
 import type { AnalysisResult, TierAllocation } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
@@ -44,36 +45,32 @@ async function callClaude(systemPrompt: string, userPrompt: string): Promise<{
   }
 }
 
-const SYSTEM_PROMPT = `You are the Bags Index Analyst — an AI agent that analyzes token performance data from the Bags ecosystem on Solana and decides optimal portfolio allocations across THREE risk tiers.
+const CANDIDATES_PER_TIER = 20
+const PICKS_PER_TIER = 10
 
-You will receive market data for tradeable tokens on Bags. Your job is to:
+const SYSTEM_PROMPT = `You are the Bags Index Analyst — an AI safety-review agent for the Bags Index on Solana.
 
-1. ANALYZE each token's metrics (holder count, holder growth, trading activity, liquidity)
-2. ASSIGN tokens to risk tiers based on their profile
-3. DECIDE allocation weights per tier (each tier must sum to 100%)
-4. EXPLAIN your reasoning transparently — users will see your entire thought process
+The quant scoring engine has already ranked every tradeable Bags token by volume, holder growth, and liquidity. For each of THREE risk tiers it sends you the top ${CANDIDATES_PER_TIER} candidates, pre-ranked by composite score.
+
+Your job is to NARROW each tier from ${CANDIDATES_PER_TIER} candidates down to ${PICKS_PER_TIER} picks, then assign allocation weights. You are the safety and judgment layer — the quant does the math, you catch what formulas can't:
+
+1. **REVIEW** each candidate for rug signals: dev wallet concentration, unlocked LP, live mint authority, suspicious holder patterns, sudden liquidity drains
+2. **REMOVE** the weakest ${CANDIDATES_PER_TIER - PICKS_PER_TIER} per tier — tokens with red flags, low conviction, or poor risk/reward
+3. **WEIGHT** the surviving ${PICKS_PER_TIER} per tier (must sum to 100%). Be opinionated — concentrate on your highest-conviction picks
+4. **EXPLAIN** every removal and every weight decision transparently — users see your full reasoning
 
 ## Risk Tiers
 
-**CONSERVATIVE** — Established tokens with deep liquidity, stable holder bases, and proven track records. Prioritize safety and stability. Avoid new launches. Favor tokens with >$100K liquidity and low holder churn.
-
-**BALANCED** — Mix of proven performers and emerging tokens with solid fundamentals. The default index experience. Balance between growth potential and risk management.
-
-**DEGEN** — High momentum plays, newer tokens, volume spikes, rapid holder growth. Maximum upside potential. Acceptable to include recent graduates, high-volatility tokens, and speculative plays. Higher concentration in top picks.
-
-Your reasoning should cover:
-- Market conditions and overall sentiment
-- Tier strategy: what kind of tokens belong in each tier today
-- Per-token analysis: why assigned to which tier, bullish/bearish signals
-- Risk factors: rug indicators, concentration risk, liquidity concerns
-- Cross-tier insights: tokens that moved between tiers and why
+**CONSERVATIVE** — Deep liquidity, stable holder bases, proven track records. Safety first.
+**BALANCED** — Mix of proven performers and emerging tokens. The default index experience.
+**DEGEN** — Momentum plays, newer tokens, volume spikes. Maximum upside, higher risk tolerance.
 
 Respond with valid JSON in this exact format:
 {
-  "summary": "2-3 sentence overview of today's analysis",
+  "summary": "2-3 sentence overview",
   "sentiment": "bullish|bearish|neutral|cautious",
-  "keyInsights": ["insight 1", "insight 2", "insight 3"],
-  "reasoning": "Your full multi-paragraph reasoning process. Be detailed and transparent. Discuss market conditions, tier strategy, individual token analysis, risk assessment, and allocation decisions. This will be displayed to users as your 'thinking process'. Use markdown formatting.",
+  "keyInsights": ["insight 1", "insight 2", "insight 3", "insight 4"],
+  "reasoning": "Full multi-paragraph reasoning. Cover: market conditions, tier strategy, why you removed each dropped token, per-pick analysis, risk assessment, cross-tier observations. Use markdown. Users see this as your thinking process.",
   "tiers": [
     {
       "tier": "CONSERVATIVE",
@@ -83,24 +80,18 @@ Respond with valid JSON in this exact format:
           "tokenName": "Token Name",
           "tokenMint": "mint_address",
           "weightPct": 15.5,
-          "reasoning": "1-2 sentence explanation for this specific allocation",
+          "reasoning": "1-2 sentence explanation",
           "confidence": "high|medium|low",
-          "signals": ["signal_type_1", "signal_type_2"]
+          "signals": ["signal_1", "signal_2"]
         }
       ]
     },
-    {
-      "tier": "BALANCED",
-      "allocations": [...]
-    },
-    {
-      "tier": "DEGEN",
-      "allocations": [...]
-    }
+    { "tier": "BALANCED", "allocations": [...] },
+    { "tier": "DEGEN", "allocations": [...] }
   ]
 }
 
-Each tier must include exactly 10 tokens. Each tier's weights must sum to 100%. Tokens CAN appear in multiple tiers with different weights. Be opinionated — don't distribute equally unless truly warranted. The DEGEN tier should feel meaningfully different from CONSERVATIVE.`
+Each tier must include exactly ${PICKS_PER_TIER} tokens. Weights must sum to 100%. Tokens CAN appear in multiple tiers. The DEGEN tier should feel meaningfully different from CONSERVATIVE.`
 
 /**
  * Analysis agent worker — runs daily via cron.
@@ -122,78 +113,52 @@ async function processAnalysis(job: Job) {
   })
 
   try {
-    // 1. Fetch tradeable tokens from Bags API (two endpoints):
-    //    - /solana/bags/pools?onlyMigrated=true → reliable migrated universe
-    //    - /token-launch/feed → metadata overlay (name, symbol, image, socials)
-    const [pools, feed] = await Promise.all([
-      getBagsPools(true),
-      getTokenFeed(),
-    ])
-    logger.info(`[analysis] Bags pools: ${pools.length} migrated, feed: ${feed.length} items`)
-    if (pools.length === 0) {
-      logger.info('[analysis] No migrated pools from Bags — skipping cycle')
+    // 1. Pull top candidates from the latest scoring cycles (one per tier).
+    //    The quant engine already ranked every Bags token by composite score
+    //    (volume + holder growth + liquidity). We take the top CANDIDATES_PER_TIER
+    //    per tier so Claude reviews double what it needs to keep.
+    const tiers: RiskTier[] = ['CONSERVATIVE', 'BALANCED', 'DEGEN']
+    const tierSections: string[] = []
+    let totalCandidates = 0
+
+    for (const tier of tiers) {
+      const latestCycle = await db.scoringCycle.findFirst({
+        where: { status: 'COMPLETED', tier },
+        orderBy: { completedAt: 'desc' },
+        include: {
+          scores: {
+            where: { isBlacklisted: false, rank: { gt: 0 } },
+            orderBy: { rank: 'asc' },
+            take: CANDIDATES_PER_TIER,
+          },
+        },
+      })
+      if (!latestCycle || latestCycle.scores.length === 0) {
+        logger.info(`[analysis] No scored tokens for ${tier} — skipping tier`)
+        continue
+      }
+      const lines = latestCycle.scores.map((s, i) =>
+        `${i + 1}. ${s.tokenSymbol} (${s.tokenName}) mint=${s.tokenMint} | score=${Number(s.compositeScore).toFixed(3)} | $${Number(s.priceUsd).toFixed(6)} price | $${Math.round(Number(s.liquidityUsd))} liq | $${Math.round(Number(s.volume24h))} vol24h | $${Math.round(Number(s.marketCapUsd))} mcap | ${s.holderCount} holders | ${Number(s.holderGrowthPct).toFixed(1)}% holder growth`
+      )
+      tierSections.push(`### ${tier} — top ${latestCycle.scores.length} candidates (pick ${PICKS_PER_TIER})\n${lines.join('\n')}`)
+      totalCandidates += latestCycle.scores.length
+    }
+
+    if (totalCandidates === 0) {
+      logger.info('[analysis] No scored tokens across any tier — skipping cycle')
       await db.analysisCycle.update({ where: { id: cycle.id }, data: { status: 'SKIPPED' } })
       return
     }
+    logger.info(`[analysis] ${totalCandidates} candidates across ${tierSections.length} tiers`)
 
-    // Build metadata lookup from feed (covers tokens that also appear there)
-    const feedByMint = new Map(feed.map((t) => [t.tokenMint, t]))
-
-    // 2. Enrich with DexScreener market data + Helius holder counts
-    const mints = pools.map((p) => p.tokenMint)
-    const dexData = await getDexVolumes(mints)
-
-    // Filter to tokens with meaningful on-chain activity
-    const activeMints = mints.filter((m) => {
-      const d = dexData.get(m)
-      return d && d.priceUsd > 0 && d.liquidityUsd >= 5000
-    })
-    logger.info(`[analysis] ${activeMints.length}/${mints.length} active after DexScreener filter`)
-
-    const tokenData = []
-    for (const mint of activeMints.slice(0, 30)) {
-      try {
-        const holderCount = await getHolderCount(mint)
-        const dex = dexData.get(mint)!
-        const meta = feedByMint.get(mint)
-
-        tokenData.push({
-          tokenMint: mint,
-          symbol: meta?.symbol ?? mint.slice(0, 6),
-          name: meta?.name ?? mint.slice(0, 8),
-          holderCount,
-          volume24h: dex.volumeH24Usd,
-          liquidityUsd: dex.liquidityUsd,
-          marketCapUsd: dex.marketCapUsd,
-          priceUsd: dex.priceUsd,
-          twitter: meta?.twitter ?? null,
-          website: meta?.website ?? null,
-        })
-      } catch (err) {
-        logger.error(`[analysis] Failed to enrich ${mint.slice(0, 8)}: ${err}`)
-      }
-      await new Promise((r) => setTimeout(r, 200))
-    }
-
-    // 3. Build prompt with market data
-    const marketDataStr = tokenData
-      .map(
-        (t) =>
-          `- ${t.symbol} (${t.name}): $${t.priceUsd.toFixed(6)} price, $${Math.round(t.liquidityUsd)} liq, $${Math.round(t.volume24h)} vol24h, $${Math.round(t.marketCapUsd)} mcap, ${t.holderCount} holders, twitter: ${t.twitter ?? 'none'}, website: ${t.website ?? 'none'}`
-      )
-      .join('\n')
-
+    // 2. Build prompt
     const userPrompt = `Today's date: ${new Date().toISOString().split('T')[0]}
 
-Here are the current tradeable tokens on Bags with their data:
+The quant scoring engine ranked every tradeable Bags token. Below are the top ${CANDIDATES_PER_TIER} candidates per tier, pre-ranked by composite score. Your job: review each, drop ${CANDIDATES_PER_TIER - PICKS_PER_TIER} per tier, weight the ${PICKS_PER_TIER} survivors.
 
-${marketDataStr}
+${tierSections.join('\n\n')}
 
-Analyze these tokens and produce your index allocation for today. Remember:
-- Select the top 10 for the index
-- Assign weights summing to 100%
-- Be transparent in your reasoning
-- Flag any risk concerns`
+For each tier: pick ${PICKS_PER_TIER}, drop ${CANDIDATES_PER_TIER - PICKS_PER_TIER}, assign weights summing to 100%. Explain every removal. Flag any risk concerns.`
 
     // 4. Call Claude
     logger.info('[analysis] Calling Claude for analysis...')
@@ -229,7 +194,7 @@ Analyze these tokens and produce your index allocation for today. Remember:
         summary: result.summary,
         sentiment: result.sentiment,
         keyInsights: result.keyInsights,
-        marketDataJson: tokenData as any,
+        marketDataJson: tierSections as any,
         promptTokens,
         outputTokens,
         durationMs,
