@@ -94,6 +94,8 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
         ? { factor: 'holder growth', symbol: topByHolders.tokenSymbol }
         : { factor: 'volume', symbol: topByVolume.tokenSymbol }
 
+    const now = new Date()
+    const timeTag = `${now.getUTCHours().toString().padStart(2, '0')}:${now.getUTCMinutes().toString().padStart(2, '0')} UTC`
     const lines: string[] = [`${TIER_EMOJI[tier]} ${tier} index reshuffle`, '']
     lines.push(`Top: ${top3}`)
     const changes: string[] = []
@@ -102,6 +104,7 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
     if (changes.length) lines.push(changes.join(' '))
     lines.push('')
     lines.push(`Driver: ${topDriver.symbol} on ${topDriver.factor}.`)
+    lines.push(timeTag)
 
     let text = lines.join('\n')
     if (text.length > 275) text = text.slice(0, 272) + '…'
