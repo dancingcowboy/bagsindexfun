@@ -1,5 +1,6 @@
 'use client'
 
+import React from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
@@ -712,6 +713,35 @@ export default function LandingPage() {
 
 /* ─── Protocol Vault Card ─────────────────────────────────────────────────── */
 
+function VaultCopyCAButton({ mint }: { mint: string }) {
+  const [copied, setCopied] = React.useState(false)
+  const copy = React.useCallback(() => {
+    navigator.clipboard.writeText(mint)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [mint])
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); copy() }}
+      className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold transition-colors ${
+        copied
+          ? 'border-[#00D62B]/50 text-[#00D62B]'
+          : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]'
+      }`}
+      title="Copy contract address"
+    >
+      {copied ? 'copied' : 'ca'}
+    </button>
+  )
+}
+
+function formatMC(mc: number) {
+  if (mc <= 0) return '—'
+  if (mc >= 1_000_000) return `$${(mc / 1_000_000).toFixed(1)}M`
+  if (mc >= 1_000) return `$${(mc / 1_000).toFixed(0)}K`
+  return `$${mc.toFixed(0)}`
+}
+
 function ProtocolVaultSection() {
   const vault = useQuery<any>({
     queryKey: ['protocol-vault'],
@@ -740,7 +770,7 @@ function ProtocolVaultSection() {
           Platform fees are auto-deposited into the Balanced index. This vault eats its own cooking.
         </p>
 
-        <div className="mx-auto max-w-3xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] overflow-hidden">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] overflow-hidden">
           {/* Header stats */}
           <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
             <div>
@@ -766,14 +796,17 @@ function ProtocolVaultSection() {
             </div>
           </div>
 
-          {/* Holdings table */}
+          {/* Holdings table — mirrors dashboard */}
           {data.holdings.length > 0 && (
             <table className="w-full">
               <thead>
                 <tr className="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
-                  <th className="px-6 py-2 text-left font-medium">Token</th>
-                  <th className="px-6 py-2 text-right font-medium">Value (SOL)</th>
-                  <th className="px-6 py-2 text-right font-medium">Weight</th>
+                  <th className="px-5 py-2 text-left font-medium">Token</th>
+                  <th className="px-5 py-2 text-right font-medium">MC</th>
+                  <th className="px-5 py-2 text-center font-medium">Links</th>
+                  <th className="px-5 py-2 text-right font-medium">Amount</th>
+                  <th className="px-5 py-2 text-right font-medium">Value (SOL)</th>
+                  <th className="px-5 py-2 text-right font-medium">Allocation</th>
                 </tr>
               </thead>
               <tbody>
@@ -782,16 +815,35 @@ function ProtocolVaultSection() {
                     key={h.tokenMint}
                     className="border-t border-[var(--color-border)] hover:bg-white/[0.02]"
                   >
-                    <td className="px-6 py-3 text-sm">
+                    <td className="px-5 py-3 text-sm">
                       <div className="font-semibold">{h.tokenSymbol}</div>
                       <div className="font-[family-name:var(--font-mono)] text-[10px] text-[var(--color-text-muted)]">
                         {h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}
                       </div>
                     </td>
-                    <td className="px-6 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
+                    <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)]">
+                      {formatMC(h.marketCapUsd)}
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <a
+                          href={`https://dexscreener.com/solana/${h.tokenMint}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)] transition-colors"
+                        >
+                          dex
+                        </a>
+                        <VaultCopyCAButton mint={h.tokenMint} />
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
+                      {Number(h.amount).toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm">
                       {Number(h.valueSolEst).toFixed(4)}
                     </td>
-                    <td className="px-6 py-3 text-right">
+                    <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <div className="h-2 w-16 overflow-hidden rounded-full bg-black/30">
                           <div
@@ -802,7 +854,7 @@ function ProtocolVaultSection() {
                             }}
                           />
                         </div>
-                        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--color-text-muted)] w-10 text-right">
+                        <span className="font-[family-name:var(--font-mono)] text-sm" style={{ color: '#00D62B' }}>
                           {h.weightPct}%
                         </span>
                       </div>

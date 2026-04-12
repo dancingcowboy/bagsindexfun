@@ -513,18 +513,18 @@ export async function indexInfoRoutes(app: FastifyInstance) {
       const sw = user.subWallets[0]
       if (!sw) return { success: true, data: null }
 
-      // Resolve token symbols
+      // Resolve token symbols + market caps
       const mints = sw.holdings.map((h) => h.tokenMint)
       const scores = mints.length
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: mints } },
             orderBy: { scoredAt: 'desc' },
-            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+            select: { tokenMint: true, tokenSymbol: true, tokenName: true, marketCapUsd: true },
           })
         : []
-      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      const metaByMint = new Map<string, { symbol: string; name: string; marketCapUsd: number }>()
       for (const s of scores) {
-        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName, marketCapUsd: Number(s.marketCapUsd) })
       }
 
       const tokenValueSol = sw.holdings.reduce((s, h) => s + Number(h.valueSolEst || 0), 0)
@@ -559,7 +559,9 @@ export async function indexInfoRoutes(app: FastifyInstance) {
                 tokenMint: h.tokenMint,
                 tokenSymbol: meta?.symbol ?? h.tokenMint.slice(0, 6),
                 tokenName: meta?.name ?? null,
+                amount: h.amount.toString(),
                 valueSolEst: Number(h.valueSolEst || 0).toFixed(6),
+                marketCapUsd: meta?.marketCapUsd ?? 0,
                 weightPct: 0, // filled below
               }
             })
