@@ -28,6 +28,17 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'No holdings to withdraw' })
       }
 
+      const inflight = await db.withdrawal.findFirst({
+        where: {
+          userId,
+          riskTier,
+          status: { in: ['PENDING', 'PARTIAL'] },
+        },
+      })
+      if (inflight) {
+        return reply.status(409).send({ error: 'Withdrawal already in progress for this tier' })
+      }
+
       const totalValueSol = subWallet.holdings.reduce(
         (sum, h) => sum + Number(h.valueSolEst),
         0

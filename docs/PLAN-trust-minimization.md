@@ -111,7 +111,7 @@ Same program but with tight rules immediately: on-chain oracles for scoring, com
 
 1. **Upgrade authority** — do we keep the program upgradeable initially (faster fixes, less trustless) or ship with `--final` (more trustless, no fixes)? Consensus in Solana land: upgradeable for first 6 months, then freeze or move to multisig.
 2. **Fee routing** — where do deposit/withdraw/switch fees go? Probably a fixed `FEE_VAULT` address in the program, non-upgradable, our hot wallet. Easy.
-3. **Platform token exposure** — every vault holds 8% $BAGSX, handled by the existing rebalance worker, off-chain.
+3. **Platform token exposure** — every vault holds 10% $BAGSX, handled by the existing rebalance worker, off-chain.
 4. **Switching tiers** — currently `/portfolio/switch` is a fast-path that avoids withdraw+deposit fees. In the PDA world, switching means moving funds from one PDA to another. Still doable, needs a dedicated `switch_tier` instruction.
 5. **Keeper identity** — single hardcoded pubkey (simple, SPOF), or a set of keepers (resilient, more complex)? Probably start with one, add set later.
 6. **Partial withdrawals** — can users withdraw X% of their position without closing the PDA? Should be easy, just an amount parameter.

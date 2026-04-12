@@ -352,8 +352,12 @@ export async function portfolioRoutes(app: FastifyInstance) {
           : 0
         const costBasis = netDepositedByTier.get(w.riskTier) ?? 0
         const realized = Number(w.realizedPnlSol)
-        const unrealized = currentValue - costBasis
-        const totalPnl = realized + unrealized
+        // `costBasis` here is net user capital still in the vault
+        // (deposits - withdrawals). That already bakes realized cashflows
+        // into the base, so total PnL is simply current value minus net
+        // capital, and unrealized is the remainder after realized PnL.
+        const totalPnl = currentValue - costBasis
+        const unrealized = totalPnl - realized
         const pnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0
         return {
           riskTier: w.riskTier,

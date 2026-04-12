@@ -120,7 +120,7 @@ export default function LandingPage() {
           >
             Deposit SOL. Auto-allocate across the top 10 performing tokens on
             Bags — scored daily by volume, holder growth, and liquidity. Every
-            vault holds 8% $BAGSX.
+            vault holds 10% $BAGSX.
           </motion.p>
 
           <motion.div
@@ -251,7 +251,7 @@ export default function LandingPage() {
               step: '01',
               icon: <Zap className="h-5 w-5" />,
               title: 'Pick a Tier & Deposit',
-              desc: 'Choose Conservative, Balanced, or Degen. Deposit SOL — 100% enters your vault, 8% of which is $BAGSX exposure.',
+              desc: 'Choose Conservative, Balanced, or Degen. Deposit SOL — 100% enters your vault, 10% of which is $BAGSX exposure.',
             },
             {
               step: '02',
@@ -473,14 +473,14 @@ export default function LandingPage() {
             <span style={{ color: '#00D62B' }}>Exposure</span>
           </h2>
           <p className="mt-3 text-[var(--color-text-secondary)] max-w-md mx-auto">
-            Every vault holds a fixed 8% slice of the platform token. No fees.
+            Every vault holds a fixed 10% slice of the platform token. No fees.
           </p>
         </div>
 
         <div className="mx-auto max-w-xl">
           {[
             { icon: <Users className="h-5 w-5" />, text: 'Users deposit SOL', color: '#00D62B' },
-            { icon: <Flame className="h-5 w-5" />, text: 'Every vault holds 8% $BAGSX', color: '#ff4444' },
+            { icon: <Flame className="h-5 w-5" />, text: 'Every vault holds 10% $BAGSX', color: '#ff4444' },
             { icon: <TrendingUp className="h-5 w-5" />, text: 'TVL grows → protocol accumulates more $BAGSX', color: '#00D62B' },
             { icon: <Zap className="h-5 w-5" />, text: 'No fees — 100% of every flow goes to users', color: '#ffd000' },
           ].map((step, i) => (
@@ -505,7 +505,7 @@ export default function LandingPage() {
             </motion.div>
           ))}
           <p className="text-center text-xs text-[var(--color-text-muted)] mt-4">
-            Every user vault and the protocol vault alike hold 8% $BAGSX
+            Every user vault and the protocol vault alike hold 10% $BAGSX
           </p>
         </div>
       </section>
@@ -520,7 +520,7 @@ export default function LandingPage() {
             Every $BAGSX trade earns fees on Bags. The protocol vault wallet
             collects its share, a worker <strong>auto-claims every 4 hours</strong>,
             and the SOL is deposited into the index vaults. The protocol vault
-            holds 8% $BAGSX just like every user vault.
+            holds 10% $BAGSX just like every user vault.
           </p>
         </div>
 
@@ -538,8 +538,8 @@ export default function LandingPage() {
             },
             {
               step: '3',
-              title: '8% $BAGSX slice',
-              desc: 'Every vault — user and protocol — holds a fixed 8% exposure to $BAGSX. No fees.',
+              title: '10% $BAGSX slice',
+              desc: 'Every vault — user and protocol — holds a fixed 10% exposure to $BAGSX. No fees.',
             },
           ].map((s) => (
             <div

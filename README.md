@@ -2,13 +2,13 @@
 
 An AI-powered, non-custodial index vault on Solana built for the [Bags](https://bags.fm) ecosystem.
 
-Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every vault holds a fixed 8% exposure to $BAGSX, the platform token.
+Deposit SOL → choose a risk tier → the AI agent allocates across the top 10 performing tokens on Bags → daily rebalance → every vault holds a fixed 10% exposure to $BAGSX, the platform token.
 
 ---
 
 ## Bags Hackathon Submission
 
-**One-liner:** Deposit SOL, get instant exposure to the top 10 performing tokens on Bags, rebalanced daily — fully non-custodial, with a fixed 8% $BAGSX exposure in every vault and an autonomous Claude agent in the loop.
+**One-liner:** Deposit SOL, get instant exposure to the top 10 performing tokens on Bags, rebalanced daily — fully non-custodial, with a fixed 10% $BAGSX exposure in every vault and an autonomous Claude agent in the loop.
 
 **Categories:** Bags API · Fee Sharing · AI Agents · Claude Skills
 
@@ -53,10 +53,10 @@ $BAGSX itself is a Bags-launched token, so platform-token exposure is fully nati
 
 On top of the quant ranking, an **autonomous Claude agent** reviews the candidate set every cycle — reading holder distribution, liquidity depth, recent price action, and on-chain signals to flag rug risk, sanity-check the top 10, and eject tokens that look compromised before they hit user vaults. The quant filter does the ranking; the agent adds a second layer of judgment that a pure formula can't. Every decision is logged for auditability.
 
-### Every vault holds 8% $BAGSX
+### Every vault holds 10% $BAGSX
 
 A flat rule applies to **every vault** in the system — user vaults and the protocol's own fee-share vault alike:
-- **8% of every vault** is held in $BAGSX, the platform token
+- **10% of every vault** is held in $BAGSX, the platform token
 - **No deposit, withdrawal, or switch fees.** 100% of every deposit is allocated; 100% of every withdrawal returns to the user (BAGSX sold back to SOL alongside the rest of the holdings)
 - **Auto-claimed Bags fee revenue** flows through the same deposit pipeline into the protocol's own vault, so the protocol accumulates more $BAGSX on every claim
 
@@ -76,7 +76,7 @@ bags-index is live, not a prototype. The $BAGSX contract is deployed on Bags, th
 
 ### Why it matters for Bags
 
-bags-index turns Bags into an index-investable ecosystem. Instead of picking one token and hoping, users get diversified, rules-based exposure to whatever is actually working on Bags right now — quant-scored, AI-reviewed, and fairly executed — and every vault holds a fixed 8% slice of $BAGSX, so the protocol accumulates more of the platform token as TVL grows. It's a passive product that makes the whole Bags launchpad more investable.
+bags-index turns Bags into an index-investable ecosystem. Instead of picking one token and hoping, users get diversified, rules-based exposure to whatever is actually working on Bags right now — quant-scored, AI-reviewed, and fairly executed — and every vault holds a fixed 10% slice of $BAGSX, so the protocol accumulates more of the platform token as TVL grows. It's a passive product that makes the whole Bags launchpad more investable.
 
 ### What's next — Bags App Store integration
 
@@ -92,9 +92,9 @@ Each user gets **one sub-wallet per tier** — you can deposit into any combinat
 
 | Tier | Universe filter | Scoring weights | SOL anchor | Rebalance |
 |------|-----------------|------------------|------------|-----------|
-| **Conservative** | ≥ $8k liquidity, ≥ 200 holders, ≥ 5d old, vol₇d ≤ 0.6 | 0.30 vol · 0.40 growth · **0.30 liq** | **12% SOL + 8% $BAGSX** | every **24h** |
-| **Balanced** | ≥ $10k liquidity, ≥ 150 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 8% $BAGSX | every **12h** |
-| **Degen** | ≥ $5k liquidity, ≥ 50 holders, **≤ 90d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 8% $BAGSX | every **4h** |
+| **Conservative** | ≥ $8k liquidity, ≥ 200 holders, ≥ 5d old, vol₇d ≤ 0.6 | 0.30 vol · 0.40 growth · **0.30 liq** | **12% SOL + 10% $BAGSX** | every **24h** |
+| **Balanced** | ≥ $10k liquidity, ≥ 150 holders, ≥ 3d old, vol₇d ≤ 1.5 | **0.50 vol** · 0.30 growth · 0.20 liq | 10% $BAGSX | every **12h** |
+| **Degen** | ≥ $5k liquidity, ≥ 50 holders, **≤ 90d old**, vol₇d ≤ 5.0 | 0.35 vol · **0.55 growth** · 0.10 liq | 10% $BAGSX | every **4h** |
 
 A token can appear in more than one tier, but the filters and weights make each basket behave very differently: Conservative is "SOL + the boring winners", Degen is "fresh momentum with velocity."
 
@@ -150,7 +150,7 @@ User signs SOL transfer via Privy → POST /deposits/:id/confirm { txSignature }
 API verifies on-chain, marks CONFIRMED, enqueues deposit-allocation.
       ↓
 Allocation worker loads latestCycle.scores filtered by riskTier:
-  reserves 8% of the vault for $BAGSX (and, on CONSERVATIVE, a 12% SOL anchor)
+  reserves 10% of the vault for $BAGSX (and, on CONSERVATIVE, a 12% SOL anchor)
   for each score: weight = composite / totalComposite × (remaining %)
                   solForToken = allocatableSol × weight
                   build buy via Bags, sign via Privy, submit, update holdings
@@ -177,7 +177,7 @@ Users can withdraw at any time — funds are never pooled. Each tier withdraws i
 
 ### Platform token exposure
 
-- **Every vault holds a fixed 8% slice of $BAGSX**, user vaults and the protocol vault alike
+- **Every vault holds a fixed 10% slice of $BAGSX**, user vaults and the protocol vault alike
 - **No deposit, withdrawal, or switch fees** — 100% of every flow goes to the user
 - **Auto-claimed Bags fee revenue** flows through the same deposit pipeline into the protocol's own vault, so the protocol accumulates more $BAGSX every time it claims
 - Withdrawals sell the $BAGSX slice back to SOL alongside every other holding — no special casing

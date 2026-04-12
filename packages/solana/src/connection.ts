@@ -24,3 +24,40 @@ export async function getNativeSolBalanceLamports(address: string): Promise<bigi
   const lamports = await conn.getBalance(new PublicKey(address))
   return BigInt(lamports)
 }
+
+/**
+ * Verify that a confirmed transaction contains a SystemProgram transfer that
+ * matches the expected source, destination, and lamport amount.
+ */
+export async function hasConfirmedSystemTransfer(params: {
+  txSignature: string
+  fromAddress: string
+  toAddress: string
+  lamports: bigint
+}): Promise<boolean> {
+  const conn = getConnection()
+  const tx = await conn.getParsedTransaction(params.txSignature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  })
+  if (!tx || tx.meta?.err) return false
+
+  for (const ix of tx.transaction.message.instructions) {
+    if (!('parsed' in ix) || !ix.parsed || ix.program !== 'system') continue
+    const parsed = ix.parsed as {
+      type?: string
+      info?: { source?: string; destination?: string; lamports?: number | string }
+    }
+    if (parsed.type !== 'transfer' || !parsed.info) continue
+    const lamports = BigInt(parsed.info.lamports ?? 0)
+    if (
+      parsed.info.source === params.fromAddress &&
+      parsed.info.destination === params.toAddress &&
+      lamports === params.lamports
+    ) {
+      return true
+    }
+  }
+
+  return false
+}

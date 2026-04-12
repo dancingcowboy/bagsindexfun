@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
-import { createDepositSchema, confirmDepositSchema } from '@bags-index/shared'
+import { createDepositSchema, confirmDepositSchema, LAMPORTS_PER_SOL } from '@bags-index/shared'
+import { hasConfirmedSystemTransfer } from '@bags-index/solana'
 import { requireAuth } from '../middleware/auth.js'
 import { depositQueue } from '../queue/queues.js'
 
@@ -104,6 +105,29 @@ export async function depositRoutes(app: FastifyInstance) {
       if (!deposit) return reply.status(404).send({ error: 'Deposit not found' })
       if (deposit.status !== 'PENDING') {
         return reply.status(400).send({ error: 'Deposit already processed' })
+      }
+
+      const subWallet = await db.subWallet.findUnique({
+        where: { userId_riskTier: { userId, riskTier: deposit.riskTier } },
+        select: { address: true },
+      })
+      if (!subWallet) {
+        return reply.status(400).send({ error: 'Sub-wallet not initialized' })
+      }
+
+      const expectedLamports = BigInt(
+        Math.round(Number(deposit.amountSol) * LAMPORTS_PER_SOL),
+      )
+      const verified = await hasConfirmedSystemTransfer({
+        txSignature,
+        fromAddress: req.authUser!.walletAddress,
+        toAddress: subWallet.address,
+        lamports: expectedLamports,
+      })
+      if (!verified) {
+        return reply.status(400).send({
+          error: 'Submitted transaction does not contain the expected confirmed deposit transfer',
+        })
       }
 
       // Update with tx signature

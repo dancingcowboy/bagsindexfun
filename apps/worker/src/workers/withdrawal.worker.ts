@@ -62,6 +62,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
 
   let totalRecoveredLamports = 0n
   let failedTokens = 0
+  let transferredLamports = 0n
 
   // Sell each holding sequentially (full or pct%)
   for (const holding of subWallet.holdings) {
@@ -157,21 +158,12 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     await new Promise((r) => setTimeout(r, 2_000))
   }
 
-  // Update withdrawal status
-  const status = failedTokens > 0 ? 'PARTIAL' : 'CONFIRMED'
-  await db.withdrawal.update({
-    where: { id: withdrawalId },
-    data: {
-      status: status as any,
-      confirmedAt: new Date(),
-    },
-  })
-
   // Transfer recovered SOL to the user's connected wallet.
   // For full liquidations with no failures the wallet is empty — send
   // the entire on-chain SOL balance (minus a minimal tx fee). For partial
   // withdrawals keep a gas reserve so the wallet can pay future tx fees.
   let transferSig: string | null = null
+  let payoutFailed = false
   try {
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user) throw new Error(`User ${userId} not found`)
@@ -196,16 +188,26 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
         toAddress: user.walletAddress,
         lamports: sendable,
       })
+      transferredLamports = sendable
       logger.info(`[withdrawal] Sent ${sendable} lamports to ${user.walletAddress}: ${transferSig}`)
-      await db.withdrawal.update({
-        where: { id: withdrawalId },
-        data: { txSignature: transferSig },
-      })
     }
   } catch (err) {
     logger.error(`[withdrawal] SOL transfer to user failed: ${err}`)
-    failedTokens++
+    payoutFailed = true
   }
+
+  // Persist the final status only after the payout step, otherwise a failed
+  // SOL transfer can incorrectly appear as a completed withdrawal.
+  const status = failedTokens > 0 || payoutFailed ? 'PARTIAL' : 'CONFIRMED'
+  await db.withdrawal.update({
+    where: { id: withdrawalId },
+    data: {
+      status: status as any,
+      confirmedAt: new Date(),
+      txSignature: transferSig,
+      amountSol: Number(transferredLamports) / LAMPORTS_PER_SOL,
+    },
+  })
 
   // Reconcile DB holdings to actual on-chain SPL balances. After a
   // withdrawal some sells may have failed (PARTIAL state) — this catches
