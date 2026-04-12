@@ -133,7 +133,13 @@ await app.register(portfolioRoutes, { prefix: '/portfolio' })
 await app.register(indexInfoRoutes, { prefix: '/index' })
 await app.register(projectRoutes, { prefix: '/projects' })
 await app.register(analysisRoutes, { prefix: '/analysis' })
-await app.register(solanaRpcRoutes, { prefix: '/solana/rpc' })
+await app.register(async (scoped) => {
+  await scoped.register(rateLimit, {
+    max: 20,
+    timeWindow: '1 minute',
+  })
+  await scoped.register(solanaRpcRoutes)
+}, { prefix: '/solana/rpc' })
 
 // Chat — webhook is unauthenticated (Telegram calls it) so rate-limit it
 await app.register(async (scoped) => {
