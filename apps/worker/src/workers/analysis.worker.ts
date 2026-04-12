@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
-import { getTokenFeed, getHolderCount } from '@bags-index/solana'
+import { getBagsPools, getTokenFeed, getHolderCount, getDexVolumes } from '@bags-index/solana'
 import { QUEUE_ANALYSIS, RISK_TIERS } from '@bags-index/shared'
 import type { AnalysisResult, TierAllocation } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
@@ -122,36 +122,55 @@ async function processAnalysis(job: Job) {
   })
 
   try {
-    // 1. Fetch token data from Bags
-    const feed = await getTokenFeed()
-    const tradeable = feed.filter((t) => t.status === 'MIGRATED')
-    logger.info(`[analysis] Found ${tradeable.length} tradeable tokens`)
+    // 1. Fetch tradeable tokens from Bags API (two endpoints):
+    //    - /solana/bags/pools?onlyMigrated=true → reliable migrated universe
+    //    - /token-launch/feed → metadata overlay (name, symbol, image, socials)
+    const [pools, feed] = await Promise.all([
+      getBagsPools(true),
+      getTokenFeed(),
+    ])
+    logger.info(`[analysis] Bags pools: ${pools.length} migrated, feed: ${feed.length} items`)
+    if (pools.length === 0) {
+      logger.info('[analysis] No migrated pools from Bags — skipping cycle')
+      await db.analysisCycle.update({ where: { id: cycle.id }, data: { status: 'SKIPPED' } })
+      return
+    }
 
-    // 2. Enrich with holder data from Helius
+    // Build metadata lookup from feed (covers tokens that also appear there)
+    const feedByMint = new Map(feed.map((t) => [t.tokenMint, t]))
+
+    // 2. Enrich with DexScreener market data + Helius holder counts
+    const mints = pools.map((p) => p.tokenMint)
+    const dexData = await getDexVolumes(mints)
+
+    // Filter to tokens with meaningful on-chain activity
+    const activeMints = mints.filter((m) => {
+      const d = dexData.get(m)
+      return d && d.priceUsd > 0 && d.liquidityUsd >= 5000
+    })
+    logger.info(`[analysis] ${activeMints.length}/${mints.length} active after DexScreener filter`)
+
     const tokenData = []
-    for (const token of tradeable.slice(0, 30)) {
+    for (const mint of activeMints.slice(0, 30)) {
       try {
-        const holderCount = await getHolderCount(token.tokenMint)
-
-        // Get previous holder count for growth calculation
-        const prevAllocation = await db.analysisAllocation.findFirst({
-          where: { tokenMint: token.tokenMint },
-          orderBy: { analysisCycle: { createdAt: 'desc' } },
-        })
+        const holderCount = await getHolderCount(mint)
+        const dex = dexData.get(mint)!
+        const meta = feedByMint.get(mint)
 
         tokenData.push({
-          tokenMint: token.tokenMint,
-          symbol: token.symbol,
-          name: token.name,
-          image: token.image,
+          tokenMint: mint,
+          symbol: meta?.symbol ?? mint.slice(0, 6),
+          name: meta?.name ?? mint.slice(0, 8),
           holderCount,
-          prevHolderCount: prevAllocation ? undefined : holderCount,
-          hasPool: !!token.dbcPoolKey || !!token.dammV2PoolKey,
-          twitter: token.twitter,
-          website: token.website,
+          volume24h: dex.volumeH24Usd,
+          liquidityUsd: dex.liquidityUsd,
+          marketCapUsd: dex.marketCapUsd,
+          priceUsd: dex.priceUsd,
+          twitter: meta?.twitter ?? null,
+          website: meta?.website ?? null,
         })
       } catch (err) {
-        logger.error(`[analysis] Failed to enrich ${token.symbol}: ${err}`)
+        logger.error(`[analysis] Failed to enrich ${mint.slice(0, 8)}: ${err}`)
       }
       await new Promise((r) => setTimeout(r, 200))
     }
@@ -160,7 +179,7 @@ async function processAnalysis(job: Job) {
     const marketDataStr = tokenData
       .map(
         (t) =>
-          `- ${t.symbol} (${t.name}): ${t.holderCount} holders, pool: ${t.hasPool ? 'yes' : 'no'}, twitter: ${t.twitter ?? 'none'}, website: ${t.website ?? 'none'}`
+          `- ${t.symbol} (${t.name}): $${t.priceUsd.toFixed(6)} price, $${Math.round(t.liquidityUsd)} liq, $${Math.round(t.volume24h)} vol24h, $${Math.round(t.marketCapUsd)} mcap, ${t.holderCount} holders, twitter: ${t.twitter ?? 'none'}, website: ${t.website ?? 'none'}`
       )
       .join('\n')
 
