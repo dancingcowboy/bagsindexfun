@@ -1,7 +1,6 @@
 import { db } from '@bags-index/db'
 import type { RiskTier } from '@bags-index/shared'
-import { postTweet } from './twitter.js'
-import { mirrorTweetToTelegram } from './telegram.js'
+import { postToTelegram } from './telegram.js'
 
 const TIER_EMOJI: Record<string, string> = {
   CONSERVATIVE: '🟢',
@@ -15,7 +14,7 @@ const TIER_EMOJI: Record<string, string> = {
  * - Tokens added / dropped vs the previous COMPLETED cycle for THIS tier
  * - One-line reasoning (top driver across this tier's scores)
  *
- * Mirrors to Telegram via the standard helper. Never throws — failure here
+ * Posts to Telegram only (X disabled to avoid shadowban). Never throws — failure here
  * must not block the rebalance worker.
  *
  * Per-tier scoring schedules mean each tier reshuffle posts its own update,
@@ -23,8 +22,8 @@ const TIER_EMOJI: Record<string, string> = {
  */
 export async function postRebalanceAnnouncement(scoringCycleId: string): Promise<void> {
   console.log(`[rebalance-tweet] entry cycle=${scoringCycleId}`)
-  if (!process.env.TWITTER_API_KEY) {
-    console.log('[rebalance-tweet] no TWITTER_API_KEY — skipping')
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    console.log('[rebalance-tweet] no TELEGRAM_BOT_TOKEN — skipping')
     return
   }
   try {
@@ -105,14 +104,11 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
     lines.push(`Driver: ${topDriver.symbol} on ${topDriver.factor}.`)
     lines.push(timeTag)
 
-    let text = lines.join('\n')
-    if (text.length > 275) text = text.slice(0, 272) + '…'
+    const text = lines.join('\n')
 
-    console.log(`[rebalance-tweet] posting ${tier} (${text.length} chars)`)
-    const twitterId = await postTweet(text)
-    console.log(`[rebalance-tweet] tweet sent ${tier} id=${twitterId}`)
-    await mirrorTweetToTelegram(text, twitterId)
-    console.log(`[rebalance-tweet] posted ${tier} ${twitterId}`)
+    console.log(`[rebalance-tweet] sending ${tier} to telegram (${text.length} chars)`)
+    await postToTelegram(text)
+    console.log(`[rebalance-tweet] telegram sent ${tier}`)
   } catch (err: any) {
     const detail = err?.data ? JSON.stringify(err.data) : err?.message ?? String(err)
     console.error(`[rebalance-tweet] failed: ${detail}`)
