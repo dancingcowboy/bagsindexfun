@@ -255,7 +255,7 @@ async function processSingleWallet(
       ]),
     )
 
-    // Sells
+    // Sells — trim overweight positions
     for (const holding of wallet.holdings) {
       const targetWeight = targetWeights.get(holding.tokenMint) ?? 0
       const currentWeight = currentAllocations.get(holding.tokenMint) ?? 0
@@ -309,6 +309,58 @@ async function processSingleWallet(
       } catch (err) {
         logger.error(
           `[rebalance/wallet] sell failed ${holding.tokenMint.slice(0, 8)} for ${wallet.address.slice(0, 8)}: ${err}`,
+        )
+      }
+    }
+
+    // Dust sweep — fully sell any holding not in the current target set
+    // (top-10 scored tokens + BAGSX). Skips the 2% threshold so stale
+    // positions from previous cycles don't accumulate forever.
+    const freshHoldings = await db.holding.findMany({
+      where: { subWalletId: wallet.id },
+    })
+    for (const holding of freshHoldings) {
+      if (targetWeights.has(holding.tokenMint)) continue
+      if (Number(holding.amount) <= 0) continue
+      const tokensToSell = BigInt(holding.amount)
+      try {
+        const { txBytes, quote, route } = await buildSellTransaction({
+          tokenMint: holding.tokenMint,
+          tokenAmount: tokensToSell,
+          userPublicKey: wallet.address,
+        })
+        const solOut = Number(quote.outAmount) / LAMPORTS_PER_SOL
+        const realized = solOut - Number(holding.costBasisSol)
+        await db.holding.delete({ where: { id: holding.id } })
+        await db.subWallet.update({
+          where: { id: wallet.id },
+          data: { realizedPnlSol: { increment: realized } },
+        })
+        const signed = await signVersionedTxBytes({
+          walletId: wallet.privyWalletId,
+          txBytes,
+        })
+        const sig = await submitAndConfirm(signed)
+        await db.swapExecution.create({
+          data: {
+            rebalanceCycleId: cycle.id,
+            subWalletId: wallet.id,
+            inputMint: holding.tokenMint,
+            outputMint: SOL_MINT,
+            inputAmount: tokensToSell,
+            outputAmount: BigInt(quote.outAmount),
+            slippageBps: quote.slippageBps,
+            route,
+            status: 'CONFIRMED',
+            txSignature: sig,
+          },
+        })
+        logger.info(
+          `[rebalance/wallet] dust swept ${holding.tokenMint.slice(0, 8)} from ${wallet.address.slice(0, 8)}: ${solOut.toFixed(6)} SOL`,
+        )
+      } catch (err) {
+        logger.error(
+          `[rebalance/wallet] dust sweep failed ${holding.tokenMint.slice(0, 8)} for ${wallet.address.slice(0, 8)}: ${err}`,
         )
       }
     }
