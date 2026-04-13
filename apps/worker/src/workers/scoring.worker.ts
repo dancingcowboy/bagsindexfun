@@ -182,6 +182,7 @@ async function processScoring(job: Job<ScoringJobData>) {
       let universe = raw.filter(
         (t) =>
           t.liquidityUsd >= cfg.minLiquidityUsd &&
+          t.marketCapUsd >= cfg.minMarketCapUsd &&
           t.holderCount >= cfg.minHolderCount &&
           t.ageDays >= cfg.minAgeDays &&
           ('maxAgeDays' in cfg ? t.ageDays <= cfg.maxAgeDays : true)
@@ -549,6 +550,7 @@ async function processSingleTier(
     let universe = raw.filter(
       (t) =>
         t.liquidityUsd >= cfg.minLiquidityUsd &&
+        t.marketCapUsd >= cfg.minMarketCapUsd &&
         t.holderCount >= cfg.minHolderCount &&
         t.ageDays >= cfg.minAgeDays &&
         ('maxAgeDays' in cfg ? t.ageDays <= cfg.maxAgeDays : true),

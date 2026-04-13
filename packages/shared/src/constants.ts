@@ -87,6 +87,7 @@ export const TIER_SCORING_CONFIG = {
   CONSERVATIVE: {
     weights: { volume: 0.30, holderGrowth: 0.40, liquidity: 0.30 },
     minLiquidityUsd: 8_000,
+    minMarketCapUsd: 20_000,
     minHolderCount: 200,
     minAgeDays: 5,
     maxVolatility7d: 0.6,
@@ -96,6 +97,7 @@ export const TIER_SCORING_CONFIG = {
   BALANCED: {
     weights: { volume: 0.50, holderGrowth: 0.30, liquidity: 0.20 },
     minLiquidityUsd: 10_000,
+    minMarketCapUsd: 20_000,
     minHolderCount: 150,
     minAgeDays: 3,
     maxVolatility7d: 1.5,
@@ -104,6 +106,7 @@ export const TIER_SCORING_CONFIG = {
   DEGEN: {
     weights: { volume: 0.35, holderGrowth: 0.55, liquidity: 0.10 },
     minLiquidityUsd: 5_000,
+    minMarketCapUsd: 20_000,
     minHolderCount: 50,
     minAgeDays: 0,
     maxVolatility7d: 5.0,
