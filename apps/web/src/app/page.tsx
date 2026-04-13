@@ -68,6 +68,9 @@ export default function LandingPage() {
             <a href="#analysis" className="btn-ghost text-sm hidden sm:block">
               AI Agent
             </a>
+            <a href="/hotlist" className="btn-ghost text-sm hidden sm:block">
+              Hotlist
+            </a>
             <a href="/projects" className="btn-ghost text-sm hidden sm:block">
               For Projects
             </a>

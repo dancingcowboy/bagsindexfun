@@ -206,6 +206,11 @@ class ApiClient {
     })
   }
 
+  // Hotlist (public)
+  getHotlist(tier?: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN') {
+    return this.fetch<{ data: any[] }>(`/index/hotlist${tier ? `?tier=${tier}` : ''}`)
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')

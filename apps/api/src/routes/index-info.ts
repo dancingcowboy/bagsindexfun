@@ -493,6 +493,62 @@ export async function indexInfoRoutes(app: FastifyInstance) {
   )
 
   /**
+   * GET /index/hotlist
+   * All scored Bags tokens from the latest cycle per tier. Powers the
+   * public hotlist page — no new API calls needed, reuses scoring data.
+   */
+  app.get<{ Querystring: { tier?: string } }>('/hotlist', async (req, reply) => {
+    try {
+      const tiers = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
+      const tierParam = req.query.tier?.toUpperCase()
+      const filterTiers =
+        tierParam && (tiers as readonly string[]).includes(tierParam)
+          ? [tierParam as (typeof tiers)[number]]
+          : [...tiers]
+
+      const results = await Promise.all(
+        filterTiers.map(async (tier) => {
+          const cycle = await db.scoringCycle.findFirst({
+            where: { status: 'COMPLETED', tier },
+            orderBy: { completedAt: 'desc' },
+            select: { id: true, completedAt: true },
+          })
+          if (!cycle) return { tier, scoredAt: null, tokens: [] }
+
+          const scores = await db.tokenScore.findMany({
+            where: { cycleId: cycle.id, riskTier: tier },
+            orderBy: [{ rank: 'asc' }],
+          })
+          return {
+            tier,
+            scoredAt: cycle.completedAt,
+            tokens: scores.map((s) => ({
+              tokenMint: s.tokenMint,
+              tokenSymbol: s.tokenSymbol,
+              tokenName: s.tokenName,
+              rank: s.rank,
+              compositeScore: Number(s.compositeScore),
+              volume24h: Number(s.volume24h),
+              holderCount: s.holderCount,
+              holderGrowthPct: Number(s.holderGrowthPct),
+              priceUsd: Number(s.priceUsd),
+              liquidityUsd: Number(s.liquidityUsd),
+              marketCapUsd: Number(s.marketCapUsd),
+              safetyVerdict: s.safetyVerdict,
+              isBlacklisted: s.isBlacklisted,
+            })),
+          }
+        }),
+      )
+
+      return { success: true, data: results }
+    } catch (err) {
+      app.log.error(err, 'Failed to get hotlist')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
    * GET /index/vault — public protocol vault summary.
    * Shows BALANCED tier holdings, total value, and claim stats.
    * No auth required — this powers the landing page vault card.
