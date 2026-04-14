@@ -33,10 +33,6 @@ export async function processSnapshot(_job?: Job) {
 
   const wallets = await db.subWallet.findMany({ include: { holdings: true } })
   const activeWallets = wallets.filter((w) => w.holdings.length > 0)
-  if (activeWallets.length === 0) {
-    logger.info('[price-snapshot] no wallets with holdings — skipping')
-    return { snapshotsWritten: 0 }
-  }
 
   let updatedHoldings = 0
   let snapshotsWritten = 0

@@ -239,10 +239,12 @@ async function processSingleWallet(
   // Fixed platform-token exposure — identical for user and system vaults.
   targetWeights.set(BAGSX_MINT, bagsxWeight)
 
-  // Auto take-profit baseline — captured BEFORE any sells so we can
-  // compute this cycle's SOL surplus and (optionally) pay it out at the
-  // end. Only AUTO cycles are eligible; USER_FORCE reshuffles never
-  // trigger surprise payouts during active user interaction.
+  // Auto take-profit — Pool PnL model. Compute gain = currentValue −
+  // costBasis where costBasis excludes AUTO_TP withdrawals (otherwise
+  // every payout would reduce basis and trigger another payout next
+  // cycle — a compounding drain). Shrink the rebalance target pool by
+  // tpAmount so sells exceed buys by exactly that much, freeing the
+  // SOL natively for payout after the rebalance settles.
   const isAutoCycle = cycle.trigger === 'AUTO'
   const tpPct = wallet.autoTakeProfitPct ?? 0
   const tpEligible = isAutoCycle && tpPct > 0
@@ -250,28 +252,71 @@ async function processSingleWallet(
     ? await db.user.findUnique({ where: { id: wallet.userId } })
     : null
   const tpActive = tpEligible && !!tpUser?.walletAddress
-  let baselineLamports: bigint | null = null
+
+  let tpAmount = 0
   if (tpActive) {
     try {
-      baselineLamports = await getNativeSolBalanceLamports(wallet.address)
+      const tokenValueAtStart = wallet.holdings.reduce(
+        (sum, h) => sum + Number(h.valueSolEst),
+        0,
+      )
+      const nativeLamportsBefore = await getNativeSolBalanceLamports(wallet.address)
+      const nativeSolBefore = Number(nativeLamportsBefore) / LAMPORTS_PER_SOL
+      const currentValueSol = tokenValueAtStart + nativeSolBefore
+
+      const [depAgg, wdAgg] = await Promise.all([
+        db.deposit.aggregate({
+          where: {
+            userId: wallet.userId,
+            riskTier: wallet.riskTier,
+            status: { in: ['CONFIRMED', 'PARTIAL' as any] },
+          },
+          _sum: { amountSol: true, feeSol: true },
+        }),
+        db.withdrawal.aggregate({
+          where: {
+            userId: wallet.userId,
+            riskTier: wallet.riskTier,
+            source: 'USER',
+            status: { in: ['CONFIRMED', 'PARTIAL' as any] },
+          },
+          _sum: { amountSol: true },
+        }),
+      ])
+      const depositsNet =
+        Number(depAgg._sum.amountSol ?? 0) - Number(depAgg._sum.feeSol ?? 0)
+      const withdrawalsGross = Number(wdAgg._sum.amountSol ?? 0)
+      const costBasisSol = depositsNet - withdrawalsGross
+      const gain = currentValueSol - costBasisSol
+      if (gain > 0) {
+        tpAmount = (gain * tpPct) / 100
+        if (tpAmount > tokenValueAtStart) tpAmount = tokenValueAtStart
+      }
+      logger.info(
+        `[rebalance/tp] ${wallet.address.slice(0, 8)} curr=${currentValueSol.toFixed(4)} cost=${costBasisSol.toFixed(4)} gain=${gain.toFixed(4)} tp=${tpAmount.toFixed(4)} (${tpPct}%)`,
+      )
     } catch (err: any) {
       logger.error(
-        `[rebalance/tp] baseline read failed ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
+        `[rebalance/tp] calc failed ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
       )
+      tpAmount = 0
     }
   }
 
   let success = true
   try {
-    const totalValueSol = wallet.holdings.reduce(
+    const tokenValueSol = wallet.holdings.reduce(
       (sum, h) => sum + Number(h.valueSolEst),
       0,
     )
-    if (totalValueSol <= 0) {
+    if (tokenValueSol <= 0) {
       logger.info(`[rebalance/wallet] ${wallet.address.slice(0, 8)} empty — skipping`)
       await bumpAndMaybeFinish(cycle.id, true, logger, cycle.scoringCycleId)
       return
     }
+    // Shrink the target pool so the rebalance naturally produces
+    // `tpAmount` of free SOL (sells outpace buys by that margin).
+    const totalValueSol = Math.max(0.000001, tokenValueSol - tpAmount)
 
     const currentAllocations = new Map(
       wallet.holdings.map((h) => [
@@ -464,22 +509,17 @@ async function processSingleWallet(
     logger.error(`[rebalance/wallet] ${wallet.address.slice(0, 8)} failed: ${err}`)
   }
 
-  // Auto take-profit payout — runs only when the rebalance succeeded,
-  // the wallet opted in (tpPct > 0), and a baseline was captured. The
-  // payout is the user-configured percentage of the native-SOL delta
-  // across the cycle, capped so WALLET_RESERVE_SOL stays for gas.
-  if (tpActive && baselineLamports !== null && success) {
+  // Auto take-profit payout — transfer the pre-computed tpAmount from
+  // the vault's native-SOL balance to the user's external wallet. The
+  // rebalance above already freed this SOL by shrinking target weights.
+  if (tpActive && tpAmount > 0 && success) {
     try {
       const finalLamports = await getNativeSolBalanceLamports(wallet.address)
       const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
-      const rawSurplus = finalLamports - baselineLamports
       const headroom =
         finalLamports > reserveLamports ? finalLamports - reserveLamports : 0n
-      let payout = 0n
-      if (rawSurplus > 0n) {
-        const scaled = (rawSurplus * BigInt(tpPct)) / 100n
-        payout = scaled > headroom ? headroom : scaled
-      }
+      const desiredLamports = BigInt(Math.floor(tpAmount * LAMPORTS_PER_SOL))
+      const payout = desiredLamports > headroom ? headroom : desiredLamports
       const MIN_PAYOUT = 1_000_000n // 0.001 SOL floor — tx fee would eat dust
       if (payout >= MIN_PAYOUT) {
         const w = await db.withdrawal.create({
