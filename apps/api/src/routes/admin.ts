@@ -685,6 +685,97 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /admin/dex-price-history?tier=BALANCED&hours=168
+   * Admin-only per-token price series for the latest DexScreener top-10 of a
+   * given tier. Powers the chart on /admin/dex.
+   */
+  app.get<{ Querystring: { tier?: string; hours?: string } }>(
+    '/dex-price-history',
+    async (req, reply) => {
+      try {
+        const tier = (req.query.tier ?? 'BALANCED').toUpperCase() as
+          | 'CONSERVATIVE'
+          | 'BALANCED'
+          | 'DEGEN'
+        if (!['CONSERVATIVE', 'BALANCED', 'DEGEN'].includes(tier)) {
+          return reply.status(400).send({ error: 'Invalid tier' })
+        }
+        const hours = Math.min(
+          Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1),
+          24 * 90,
+        )
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000)
+
+        const cycle = await db.scoringCycle.findFirst({
+          where: { status: 'COMPLETED', tier, source: 'DEXSCREENER' },
+          orderBy: { completedAt: 'desc' },
+          include: {
+            scores: {
+              where: {
+                riskTier: tier,
+                source: 'DEXSCREENER',
+                rank: { gte: 1, lte: 10 },
+              },
+              orderBy: { rank: 'asc' },
+              select: {
+                tokenMint: true,
+                tokenSymbol: true,
+                tokenName: true,
+              },
+            },
+          },
+        })
+        if (!cycle || cycle.scores.length === 0) {
+          return { success: true, data: { tier, tokens: [], hours } }
+        }
+
+        const mints = cycle.scores.map((s) => s.tokenMint)
+        const metaByMint = new Map<
+          string,
+          { symbol: string | null; name: string | null }
+        >(
+          cycle.scores.map((s) => [
+            s.tokenMint,
+            { symbol: s.tokenSymbol, name: s.tokenName },
+          ]),
+        )
+
+        const samples = await db.tokenPriceSnapshot.findMany({
+          where: { tokenMint: { in: mints }, createdAt: { gte: since } },
+          orderBy: { createdAt: 'asc' },
+          select: { tokenMint: true, priceSol: true, createdAt: true },
+        })
+        const byMint = new Map<string, typeof samples>()
+        for (const s of samples) {
+          const arr = byMint.get(s.tokenMint) ?? []
+          arr.push(s)
+          byMint.set(s.tokenMint, arr)
+        }
+
+        const tokens = mints.map((mint) => {
+          const series = byMint.get(mint) ?? []
+          const base = series.length > 0 ? Number(series[0].priceSol) : 0
+          return {
+            tokenMint: mint,
+            tokenSymbol: metaByMint.get(mint)?.symbol ?? null,
+            tokenName: metaByMint.get(mint)?.name ?? null,
+            points: series.map((p) => ({
+              t: p.createdAt,
+              priceSol: p.priceSol.toString(),
+              indexed: base > 0 ? (Number(p.priceSol) / base) * 100 : 100,
+            })),
+          }
+        })
+
+        return { success: true, data: { tier, tokens, hours } }
+      } catch (err) {
+        app.log.error(err, 'Failed to get dex price history')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * GET /admin/dex-hotlist
    * Latest DexScreener-sourced scoring results across all 3 tiers.
    * Admin-only (preHandler enforces).

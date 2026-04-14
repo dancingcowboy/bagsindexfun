@@ -18,6 +18,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
+import { TokenPriceChart } from '@/components/TokenPriceChart'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -290,6 +291,17 @@ export default function AdminDexHotlistPage() {
           <span className="ml-auto text-xs text-[var(--color-text-muted)] self-center">
             {tokens.length} tokens
           </span>
+        </div>
+
+        {/* Chart — DexScreener top-10 price history per tier */}
+        <div className="mb-6">
+          <TokenPriceChart
+            endpoint="/admin/dex-price-history"
+            tierSelectable
+            initialTier="BALANCED"
+            title="DexScreener Top-10 Price History"
+            subtitle="Hourly-ish prices of the current top-10 per tier · normalized to 100 at range start"
+          />
         </div>
 
         {isLoading && (

@@ -9,6 +9,7 @@ import {
 import {
   QUEUE_DEX_SCORING,
   DEXSCREENER_UNIVERSE_SIZE,
+  TOP_N_TOKENS,
   RISK_TIERS,
   TIER_SCORING_CONFIG,
   MAX_TOKEN_WEIGHT_PCT,
@@ -29,6 +30,8 @@ interface RawToken {
   ageDays: number
 }
 
+type Scored = RawToken & { compositeScore: number }
+
 const SOURCE = 'DEXSCREENER'
 
 async function processDexScoring(job: Job) {
@@ -44,15 +47,15 @@ async function processDexScoring(job: Job) {
   }
 
   try {
-    // 1. Universe — top N Solana mints by 24h volume on DexScreener
+    // 1. Universe
     const mints = await getDexscreenerTopSolanaMints(DEXSCREENER_UNIVERSE_SIZE)
-    logger.info(`[dex-scoring] universe size: ${mints.length}`)
+    logger.info(`[dex-scoring] universe: ${mints.length}`)
     if (mints.length === 0) throw new Error('empty dexscreener universe')
 
-    // 2. Enrich (re-call — cheap, free API)
+    // 2. Enrich
     const volumes = await getDexVolumes(mints)
 
-    // 3. Metadata batch (1 Helius call)
+    // 3. Metadata (1 Helius call)
     const metaBatch = await getTokenMetadataBatch(mints)
     const metadata = new Map<string, { symbol: string; name: string }>()
     for (const a of metaBatch || []) {
@@ -63,40 +66,35 @@ async function processDexScoring(job: Job) {
       })
     }
 
-    // 4. Previous DexScreener cycles for holder growth (per tier, latest)
-    const prevByTier = new Map<RiskTier, Map<string, number>>()
-    for (const tier of RISK_TIERS) {
-      const prev = await db.scoringCycle.findFirst({
-        where: {
-          status: 'COMPLETED',
-          tier,
-          source: SOURCE,
-          id: { not: cycles[tier].id },
-        },
-        orderBy: { completedAt: 'desc' },
-        include: { scores: true },
-      })
-      prevByTier.set(
-        tier,
-        new Map(prev?.scores.map((s) => [s.tokenMint, s.holderCount]) ?? [])
-      )
-    }
+    // 4. Previous CONSERVATIVE cycle for holder growth baseline
+    const prev = await db.scoringCycle.findFirst({
+      where: {
+        status: 'COMPLETED',
+        tier: 'CONSERVATIVE',
+        source: SOURCE,
+      },
+      orderBy: { completedAt: 'desc' },
+      include: { scores: true },
+    })
+    const prevHolderMap = new Map<string, number>(
+      prev?.scores.map((s) => [s.tokenMint, s.holderCount]) ?? []
+    )
 
     const blacklisted = new Set(
       (await db.tokenBlacklist.findMany()).map((b) => b.tokenMint)
     )
 
-    // 5. Gather raw signals (serial with 200ms throttle → 30 Helius calls)
+    // 5. Gather raw signals (30 Helius calls, 1 page each)
     const raw: RawToken[] = []
     for (const mint of mints) {
       if (blacklisted.has(mint)) continue
       try {
         const holderCount = await getHolderCount(mint, { maxPages: 1 })
-        // Use CONSERVATIVE tier's history as the reference growth baseline (flat list)
-        const prevHolders =
-          prevByTier.get('CONSERVATIVE')?.get(mint) ?? holderCount
+        const prevHolders = prevHolderMap.get(mint) ?? holderCount
         const holderGrowthPct =
-          prevHolders > 0 ? ((holderCount - prevHolders) / prevHolders) * 100 : 0
+          prevHolders > 0
+            ? ((holderCount - prevHolders) / prevHolders) * 100
+            : 0
         const vol = volumes.get(mint)
         const priceUsd = vol?.priceUsd || 0
         const liquidityUsd = vol?.liquidityUsd || 0
@@ -127,22 +125,17 @@ async function processDexScoring(job: Job) {
       await new Promise((r) => setTimeout(r, 200))
     }
 
-    // 6. Per-tier scoring — SAME universe, DIFFERENT weights (no disjointness)
+    // 6. Per-tier scoring against full universe (no hard tier filters — raw admin intel)
+    const scoredByTier = new Map<RiskTier, Scored[]>()
     for (const tier of RISK_TIERS) {
       const cfg = TIER_SCORING_CONFIG[tier]
-      // Keep full universe visible; do NOT hard-filter like the Bags pipeline.
-      // Admin wants raw top-30 view per risk lens.
-      const universe = raw
-      if (universe.length === 0) continue
-
-      const maxVolume = Math.max(...universe.map((t) => t.volume24h), 1)
+      const maxVolume = Math.max(...raw.map((t) => t.volume24h), 1)
       const maxGrowth = Math.max(
-        ...universe.map((t) => Math.max(0, t.holderGrowthPct)),
+        ...raw.map((t) => Math.max(0, t.holderGrowthPct)),
         1
       )
-      const maxLiquidity = Math.max(...universe.map((t) => t.liquidityUsd), 1)
-
-      const scored = universe
+      const maxLiquidity = Math.max(...raw.map((t) => t.liquidityUsd), 1)
+      const scored = raw
         .map((t) => ({
           ...t,
           compositeScore:
@@ -152,25 +145,82 @@ async function processDexScoring(job: Job) {
             cfg.weights.liquidity * (t.liquidityUsd / maxLiquidity),
         }))
         .sort((a, b) => b.compositeScore - a.compositeScore)
+      scoredByTier.set(tier, scored)
+    }
 
-      // Apply per-token cap (normalize to weights, iterative cap to MAX_TOKEN_WEIGHT_PCT)
-      const total = scored.reduce((s, t) => s + t.compositeScore, 0) || 1
-      let weights = scored.map((t) => t.compositeScore / total)
-      for (let iter = 0; iter < 10; iter++) {
-        const over = weights.findIndex((w) => w > MAX_TOKEN_WEIGHT_PCT)
-        if (over < 0) break
-        const excess = weights[over] - MAX_TOKEN_WEIGHT_PCT
-        weights[over] = MAX_TOKEN_WEIGHT_PCT
-        const others = weights
-          .map((_, i) => i)
-          .filter((i) => i !== over && weights[i] < MAX_TOKEN_WEIGHT_PCT)
-        if (others.length === 0) break
-        const share = excess / others.length
-        for (const i of others) weights[i] += share
+    // 7. Greedy disjoint assignment — each mint lands in the tier where it
+    //    scores highest; each tier holds top TOP_N_TOKENS unique picks.
+    type Pair = { tier: RiskTier; token: Scored }
+    const pairs: Pair[] = []
+    for (const tier of RISK_TIERS) {
+      for (const t of scoredByTier.get(tier) ?? []) {
+        pairs.push({ tier, token: t })
+      }
+    }
+    pairs.sort((a, b) => b.token.compositeScore - a.token.compositeScore)
+
+    const assignedByTier = new Map<RiskTier, Scored[]>(
+      RISK_TIERS.map((t) => [t, []] as [RiskTier, Scored[]])
+    )
+    const assignedMints = new Set<string>()
+    for (const p of pairs) {
+      if (assignedMints.has(p.token.tokenMint)) continue
+      const bucket = assignedByTier.get(p.tier)!
+      if (bucket.length >= TOP_N_TOKENS) continue
+      bucket.push(p.token)
+      assignedMints.add(p.token.tokenMint)
+    }
+
+    // 7b. Backfill thin tiers (universe may be under 30 if DexScreener endpoints stale)
+    for (const tier of RISK_TIERS) {
+      const bucket = assignedByTier.get(tier)!
+      if (bucket.length >= TOP_N_TOKENS) continue
+      const existing = new Set(bucket.map((t) => t.tokenMint))
+      for (const t of scoredByTier.get(tier) ?? []) {
+        if (bucket.length >= TOP_N_TOKENS) break
+        if (existing.has(t.tokenMint)) continue
+        bucket.push(t)
+      }
+    }
+
+    // 8. Persist + apply per-token weight cap per tier
+    for (const tier of RISK_TIERS) {
+      const bucket = assignedByTier.get(tier)!
+      bucket.sort((a, b) => b.compositeScore - a.compositeScore)
+
+      if (bucket.length > 0) {
+        const total = bucket.reduce((s, t) => s + t.compositeScore, 0) || 1
+        const weights = new Map<string, number>(
+          bucket.map((t) => [t.tokenMint, t.compositeScore / total])
+        )
+        for (let iter = 0; iter < 10; iter++) {
+          let excess = 0
+          const capped = new Set<string>()
+          for (const [mint, w] of weights) {
+            if (w > MAX_TOKEN_WEIGHT_PCT) {
+              excess += w - MAX_TOKEN_WEIGHT_PCT
+              weights.set(mint, MAX_TOKEN_WEIGHT_PCT)
+              capped.add(mint)
+            }
+          }
+          if (excess === 0) break
+          const uncappedSum = [...weights.entries()]
+            .filter(([m]) => !capped.has(m))
+            .reduce((s, [, w]) => s + w, 0)
+          if (uncappedSum === 0) break
+          for (const [mint, w] of weights) {
+            if (!capped.has(mint)) {
+              weights.set(mint, w + excess * (w / uncappedSum))
+            }
+          }
+        }
+        for (const t of bucket) {
+          t.compositeScore = weights.get(t.tokenMint) ?? 0
+        }
       }
 
       await db.tokenScore.createMany({
-        data: scored.map((t, i) => ({
+        data: bucket.map((t, i) => ({
           cycleId: cycles[tier].id,
           riskTier: tier,
           tokenMint: t.tokenMint,
@@ -193,11 +243,49 @@ async function processDexScoring(job: Job) {
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
-          tokenCount: scored.length,
+          tokenCount: bucket.length,
         },
       })
       logger.info(
-        `[dex-scoring] ${tier}: ${scored.length} tokens scored, top=${scored[0]?.tokenSymbol}`
+        `[dex-scoring] ${tier}: ${bucket.length} picks, top=${bucket[0]?.tokenSymbol}`
+      )
+    }
+
+    // 9. Price snapshots for charting — one row per mint per cycle.
+    //    Uses DexScreener USD price → SOL via current SOL/USD from the
+    //    highest-volume token's priceUsd ratio. Keep it simple: store price_sol
+    //    as priceUsd / solUsdApprox. We derive solUsd from the heaviest mint
+    //    already paired against SOL (most DexScreener Solana pairs quote vs SOL).
+    //    If none of the top picks have a SOL pair ref we fall back to writing
+    //    priceSol = priceUsd (treated as relative; chart normalizes anyway).
+    //    Chart component normalizes to 100 at range start, so absolute unit doesn't matter.
+    const snapshotMints = new Set<string>()
+    for (const tier of RISK_TIERS) {
+      for (const t of assignedByTier.get(tier)!) snapshotMints.add(t.tokenMint)
+    }
+    const now = new Date()
+    const snapshotRows: Array<{
+      tokenMint: string
+      priceSol: string
+      marketCapUsd: string
+      createdAt: Date
+    }> = []
+    for (const mint of snapshotMints) {
+      const v = volumes.get(mint)
+      if (!v || !(v.priceUsd > 0)) continue
+      // Store priceUsd directly in the priceSol column — chart normalizes,
+      // so the scale is irrelevant as long as it's consistent across samples.
+      snapshotRows.push({
+        tokenMint: mint,
+        priceSol: v.priceUsd.toFixed(12),
+        marketCapUsd: v.marketCapUsd.toFixed(2),
+        createdAt: now,
+      })
+    }
+    if (snapshotRows.length > 0) {
+      await db.tokenPriceSnapshot.createMany({ data: snapshotRows })
+      logger.info(
+        `[dex-scoring] wrote ${snapshotRows.length} price snapshots for chart`
       )
     }
 

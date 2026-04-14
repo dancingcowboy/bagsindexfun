@@ -78,16 +78,22 @@ export function TokenPriceChart({
   const [selectedTier, setSelectedTier] = useState<Tier>(initialTier)
 
   const activeTier: Tier | undefined = tierSelectable ? selectedTier : aggregateTier
+  // When tierSelectable with custom endpoint (admin paths), use that endpoint
+  // with the selected tier and authenticated fetch.
+  const isAdminEndpoint = tierSelectable && endpoint.startsWith('/admin/')
   const tokenEndpoint = tierSelectable
-    ? `/index/token-price-history?tier=${selectedTier}&`
+    ? isAdminEndpoint
+      ? `${endpoint}?tier=${selectedTier}&`
+      : `/index/token-price-history?tier=${selectedTier}&`
     : `${endpoint}?`
 
   const q = useQuery({
     queryKey: ['token-price-history', tokenEndpoint, hours],
     queryFn: async () => {
+      const useCreds = !tierSelectable || isAdminEndpoint
       const res = await fetch(`${API_BASE}${tokenEndpoint}hours=${hours}`, {
-        credentials: tierSelectable ? 'omit' : 'include',
-        headers: tierSelectable ? {} : authHeaders(),
+        credentials: useCreds ? 'include' : 'omit',
+        headers: useCreds ? authHeaders() : {},
       })
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as { data: { tokens: TokenSeries[] } }
@@ -97,7 +103,7 @@ export function TokenPriceChart({
 
   const aggQ = useQuery({
     queryKey: ['index-aggregate-history', activeTier, hours],
-    enabled: !!activeTier,
+    enabled: !!activeTier && !isAdminEndpoint,
     queryFn: async () => {
       const res = await fetch(
         `${API_BASE}/index/aggregate-history?tier=${activeTier}&hours=${hours}`,
