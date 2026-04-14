@@ -70,7 +70,7 @@ export const blacklistTokenSchema = z.object({
 
 export const whitelistWalletSchema = z.object({
   walletAddress: z.string().min(32).max(64),
-  maxDepositSol: z.number().positive().optional().default(10),
+  maxDepositSol: z.number().positive().optional().default(30),
   note: z.string().max(500).optional(),
 })
 

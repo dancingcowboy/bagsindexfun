@@ -337,7 +337,7 @@ model SwitchJob {
 model WalletWhitelist {
   id            String   @id @default(cuid())
   walletAddress String   @unique @map("wallet_address")
-  maxDepositSol Decimal  @default(10) @map("max_deposit_sol") @db.Decimal(20, 9)
+  maxDepositSol Decimal  @default(30) @map("max_deposit_sol") @db.Decimal(20, 9)
   note          String?
   addedBy       String   @map("added_by")
   createdAt     DateTime @default(now()) @map("created_at")
