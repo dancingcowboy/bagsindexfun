@@ -74,6 +74,11 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   for (const holding of subWallet.holdings) {
     if (holding.amount <= 0n) continue
     if (alreadySoldMints.has(holding.tokenMint)) continue
+    // Skip zero-value dust — there's no Jupiter/Bags route for tokens
+    // that have gone to zero, so attempts fail, count as failedTokens,
+    // and force the withdrawal into PARTIAL forever. Reconciliation at
+    // the end cleans these rows up from the DB.
+    if (Number(holding.valueSolEst) <= 0) continue
 
     // For partial withdrawals, compute the fraction to sell
     const sellAmount = isPartial
@@ -199,16 +204,17 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   try {
     const user = await db.user.findUnique({ where: { id: userId } })
     if (!user) throw new Error(`User ${userId} not found`)
-    const walletFullyEmptied = !isPartial && failedTokens === 0
     let sendable: bigint
-    if (walletFullyEmptied) {
-      // Read the actual on-chain balance so we sweep everything (sells may
-      // have returned more than the quote predicted, and there may be
-      // pre-existing SOL in the wallet from earlier partial withdrawals).
+    if (!isPartial) {
+      // Full liquidation — sweep the entire on-chain balance, even if some
+      // tokens failed to sell (dust/no-route). This ensures pre-existing
+      // SOL from prior partial runs also goes back to the user. Status
+      // will still be marked PARTIAL below if any sells failed, so retry
+      // semantics remain intact — but the user gets their SOL now.
       const balanceLamports = await getNativeSolBalanceLamports(subWallet.address)
       // Rent-exempt minimum (890,880) + tx fee (5,000)
       const SWEEP_RESERVE = 900_000n
-      sendable = balanceLamports - SWEEP_RESERVE
+      sendable = balanceLamports > SWEEP_RESERVE ? balanceLamports - SWEEP_RESERVE : 0n
     } else {
       const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
       sendable = totalRecoveredLamports - reserveLamports
