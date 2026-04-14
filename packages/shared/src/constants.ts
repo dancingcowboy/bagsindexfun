@@ -173,6 +173,10 @@ export const QUEUE_FEE_CLAIM = 'fee-claim'
 export const QUEUE_PRICE_SNAPSHOT = 'price-snapshot'
 export const QUEUE_SWITCH = 'switch'
 export const QUEUE_VAULT_SWITCH = 'vault-switch'
+export const QUEUE_DEX_SCORING = 'dex-scoring'
+
+// DexScreener admin hotlist universe size (separate from TOP_N_TOKENS)
+export const DEXSCREENER_UNIVERSE_SIZE = 30
 
 /** Wrapped SOL mint — reference for SOL-denominated valuation. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112'

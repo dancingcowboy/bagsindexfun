@@ -17,7 +17,7 @@ export {
   type ClaimTransaction,
 } from './bags.js'
 export { getJupiterPrices, type JupPriceInfo } from './jupiter.js'
-export { getDexVolumes, type DexVolume } from './dexscreener.js'
+export { getDexVolumes, getDexscreenerTopSolanaMints, type DexVolume } from './dexscreener.js'
 export { getHolderCount, getTokenMetadata, getTokenMetadataBatch, getTokenBalances, getTransactionHistory } from './helius.js'
 export { buildBuyTransaction, buildSellTransaction, submitAndConfirm, submitAndConfirmDirect, capInputToLiquidity, type SwapRoute, type BuiltSwap } from './swap.js'
 export { getJupiterQuote, buildJupiterSwapTx, getJupiterSolValue } from './jupiter-swap.js'

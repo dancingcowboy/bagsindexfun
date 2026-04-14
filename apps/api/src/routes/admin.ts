@@ -3,7 +3,12 @@ import { db } from '@bags-index/db'
 import { blacklistTokenSchema, whitelistWalletSchema, RISK_TIERS, TWEET_PLAN, type RiskTier } from '@bags-index/shared'
 import { createSolanaServerWallet } from '@bags-index/solana'
 import { requireAdmin } from '../middleware/auth.js'
-import { scoringQueue, rebalanceQueue, priceSnapshotQueue } from '../queue/queues.js'
+import {
+  scoringQueue,
+  rebalanceQueue,
+  priceSnapshotQueue,
+  dexScoringQueue,
+} from '../queue/queues.js'
 
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
@@ -654,6 +659,79 @@ export async function adminRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to trigger scoring')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/trigger-dex-scoring
+   * Enqueue an on-demand DexScreener admin hotlist scoring cycle.
+   */
+  app.post('/trigger-dex-scoring', async (_req, reply) => {
+    try {
+      const job = await dexScoringQueue.add(
+        'manual-dex-scoring',
+        {},
+        { priority: 1 },
+      )
+      return {
+        success: true,
+        data: { jobId: job.id, message: 'DexScreener scoring queued' },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to trigger dex-scoring')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * GET /admin/dex-hotlist
+   * Latest DexScreener-sourced scoring results across all 3 tiers.
+   * Admin-only (preHandler enforces).
+   */
+  app.get('/dex-hotlist', async (_req, reply) => {
+    try {
+      const tiers = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
+      const results = await Promise.all(
+        tiers.map(async (tier) => {
+          const cycle = await db.scoringCycle.findFirst({
+            where: { status: 'COMPLETED', tier, source: 'DEXSCREENER' },
+            orderBy: { completedAt: 'desc' },
+            select: { id: true, completedAt: true },
+          })
+          if (!cycle) return { tier, scoredAt: null, tokens: [] }
+          const scores = await db.tokenScore.findMany({
+            where: {
+              cycleId: cycle.id,
+              riskTier: tier,
+              source: 'DEXSCREENER',
+            },
+            orderBy: [{ rank: 'asc' }],
+          })
+          return {
+            tier,
+            scoredAt: cycle.completedAt,
+            tokens: scores.map((s) => ({
+              tokenMint: s.tokenMint,
+              tokenSymbol: s.tokenSymbol,
+              tokenName: s.tokenName,
+              rank: s.rank,
+              compositeScore: Number(s.compositeScore),
+              volume24h: Number(s.volume24h),
+              holderCount: s.holderCount,
+              holderGrowthPct: Number(s.holderGrowthPct),
+              priceUsd: Number(s.priceUsd),
+              liquidityUsd: Number(s.liquidityUsd),
+              marketCapUsd: Number(s.marketCapUsd),
+              safetyVerdict: s.safetyVerdict,
+              isBlacklisted: s.isBlacklisted,
+            })),
+          }
+        }),
+      )
+      return { success: true, data: results }
+    } catch (err) {
+      app.log.error(err, 'Failed to get dex-hotlist')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })

@@ -509,14 +509,14 @@ export async function indexInfoRoutes(app: FastifyInstance) {
       const results = await Promise.all(
         filterTiers.map(async (tier) => {
           const cycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', tier },
+            where: { status: 'COMPLETED', tier, source: 'BAGS' },
             orderBy: { completedAt: 'desc' },
             select: { id: true, completedAt: true },
           })
           if (!cycle) return { tier, scoredAt: null, tokens: [] }
 
           const scores = await db.tokenScore.findMany({
-            where: { cycleId: cycle.id, riskTier: tier },
+            where: { cycleId: cycle.id, riskTier: tier, source: 'BAGS' },
             orderBy: [{ rank: 'asc' }],
           })
           return {

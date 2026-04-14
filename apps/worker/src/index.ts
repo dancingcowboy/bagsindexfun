@@ -5,6 +5,7 @@ import {
   QUEUE_ANALYSIS,
   QUEUE_FEE_CLAIM,
   QUEUE_PRICE_SNAPSHOT,
+  QUEUE_DEX_SCORING,
   FEE_CLAIM_INTERVAL_HOURS,
 } from '@bags-index/shared'
 import { redis } from './queue/redis.js'
@@ -16,6 +17,7 @@ import { createAnalysisWorker } from './workers/analysis.worker.js'
 import { createFeeClaimWorker } from './workers/fee-claim.worker.js'
 import { createPriceSnapshotWorker } from './workers/price-snapshot.worker.js'
 import { createSwitchWorker } from './workers/switch.worker.js'
+import { createDexScoringWorker } from './workers/dex-scoring.worker.js'
 import { startTweetPoller, stopTweetPoller } from './workers/tweet-poller.js'
 
 console.log('[worker] Starting bags-index workers...')
@@ -29,6 +31,7 @@ const analysisWorker = createAnalysisWorker()
 const feeClaimWorker = createFeeClaimWorker()
 const priceSnapshotWorker = createPriceSnapshotWorker()
 const switchWorker = createSwitchWorker()
+const dexScoringWorker = createDexScoringWorker()
 
 // Per-tier scoring on offset intervals — DEGEN every 4h23m, BALANCED every
 // 12h08m, CONSERVATIVE every 23h23m. Offsets stagger the three tiers so they
@@ -83,6 +86,14 @@ await priceSnapshotQueue.upsertJobScheduler(
   { name: 'hourly-price-snapshot' },
 )
 
+// Admin-only DexScreener hotlist scoring — every 6h, ~31 Helius calls/cycle
+const dexScoringQueue = new Queue(QUEUE_DEX_SCORING, { connection: redis })
+await dexScoringQueue.upsertJobScheduler(
+  'dex-scoring',
+  { every: 6 * HOUR_MS },
+  { name: 'dex-scoring' },
+)
+
 // Start the X campaign tweet poller (60s tick, 50min min gap)
 startTweetPoller()
 
@@ -103,6 +114,7 @@ const gracefulShutdown = async () => {
     feeClaimWorker.close(),
     priceSnapshotWorker.close(),
     switchWorker.close(),
+    dexScoringWorker.close(),
   ])
   await redis.quit()
   process.exit(0)

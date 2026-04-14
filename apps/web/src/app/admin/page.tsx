@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { usePrivy } from '@privy-io/react-auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, RefreshCw, Play, Users, Coins, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Play, Users, Coins, Shield, Activity, Twitter, Image as ImageIcon, Trash2, Send, Flame } from 'lucide-react'
 import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
@@ -359,6 +359,12 @@ export default function AdminPage() {
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/admin/dex"
+              className="btn-outline flex items-center gap-1.5 px-3 py-1.5 text-xs"
+            >
+              <Flame className="h-3 w-3" /> DexScreener
+            </Link>
             <button
               onClick={() => triggerScoring.mutate()}
               disabled={triggerScoring.isPending}

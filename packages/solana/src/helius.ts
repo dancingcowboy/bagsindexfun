@@ -9,14 +9,18 @@ function getApiKey(): string {
 /**
  * Get holder count for a token mint via Helius DAS API.
  */
-export async function getHolderCount(tokenMint: string): Promise<number> {
+export async function getHolderCount(
+  tokenMint: string,
+  opts?: { maxPages?: number }
+): Promise<number> {
   const apiKey = getApiKey()
   // Helius DAS getTokenAccounts does NOT return a reliable `total`; we have to
-  // paginate. For a prefilter we cap at 5 pages (≤5000 holders) to bound cost —
-  // any mint with ≥5000 holders is "big enough" for our purposes.
+  // paginate. Default cap is 5 pages (≤5000 holders) for the Bags path. The
+  // DexScreener admin worker passes maxPages: 1 to keep Helius budget ≤30/cycle.
+  const maxPages = opts?.maxPages ?? 5
   let cursor: string | undefined
   let total = 0
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const res = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${apiKey}`,
       {

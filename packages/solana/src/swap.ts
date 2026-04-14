@@ -243,10 +243,18 @@ export async function submitAndConfirm(
 
   // Poll signature status instead of relying on confirmTransaction's 30s
   // blockhash-bound timeout — Solana congestion often lands txs 30-90s
-  // after submission. Never re-submit here (avoids double-spend); if the
-  // caller wants to retry, it must build a fresh tx with a new blockhash.
+  // after submission.
+  //
+  // Landing reliability: Helius Sender uses skipPreflight+maxRetries=0
+  // (fire-and-forget). If Jito doesn't bundle the tx in its ~60s window,
+  // the blockhash expires and the tx is lost. To counter this without
+  // paying more in tips, we rebroadcast the SAME signed tx via regular
+  // RPC on a steady cadence — same signature = no double-spend risk,
+  // the Jito tip instruction is already in the signed bytes so total
+  // cost is unchanged. Whichever path lands first wins.
   const timeoutMs = opts?.timeoutMs ?? 90_000
   const deadline = Date.now() + timeoutMs
+  let lastRebroadcast = Date.now()
   while (Date.now() < deadline) {
     try {
       const { value } = await connection.getSignatureStatuses([signature])
@@ -263,6 +271,15 @@ export async function submitAndConfirm(
     } catch (err: any) {
       if (err?.message?.startsWith('Transaction failed on-chain')) throw err
       // transient RPC error — keep polling
+    }
+    // Rebroadcast every ~10s via direct RPC to keep the tx alive across
+    // leader slots while Jito races for bundle inclusion. Silent on
+    // rebroadcast errors (duplicate signature, already-processed, etc).
+    if (Date.now() - lastRebroadcast >= 10_000) {
+      lastRebroadcast = Date.now()
+      connection
+        .sendRawTransaction(signedTxBytes, { skipPreflight: true, maxRetries: 0 })
+        .catch(() => {})
     }
     await new Promise((r) => setTimeout(r, 3_000))
   }

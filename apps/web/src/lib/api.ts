@@ -221,6 +221,18 @@ class ApiClient {
     return this.fetch<{ data: any[] }>(`/index/hotlist${tier ? `?tier=${tier}` : ''}`)
   }
 
+  // DexScreener admin hotlist
+  getDexHotlist() {
+    return this.fetch<{ data: any[] }>('/admin/dex-hotlist')
+  }
+
+  triggerDexScoring() {
+    return this.fetch<{ data: { jobId: string; message: string } }>(
+      '/admin/trigger-dex-scoring',
+      { method: 'POST' },
+    )
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')
