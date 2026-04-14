@@ -484,12 +484,11 @@ export async function portfolioRoutes(app: FastifyInstance) {
         }),
       )
 
-      // Cost basis per tier = net user cashflow (deposits − withdrawals).
-      // The holdings.costBasisSol column only tracks the portion that
-      // actually got swapped into tokens, so it understates cost whenever
-      // capInputToLiquidity leaves part of the deposit sitting as native
-      // SOL in the sub-wallet — that native SOL is still the user's money.
-      const [depositRows, withdrawalRows] = await Promise.all([
+      // Per-tier cashflows. Deposits net-of-fee (fees never enter vault).
+      // Withdrawals split by source: USER cash-outs consume basis
+      // proportionally; AUTO_TP payouts are pure realized gain above
+      // basis (matches the TP policy — payouts don't reduce cost basis).
+      const [depositRows, userWdRows, autoTpWdRows] = await Promise.all([
         db.deposit.groupBy({
           by: ['riskTier'],
           where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
@@ -497,25 +496,26 @@ export async function portfolioRoutes(app: FastifyInstance) {
         }),
         db.withdrawal.groupBy({
           by: ['riskTier'],
-          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
-          _sum: { amountSol: true, feeSol: true },
+          where: { userId, source: 'USER', status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          _sum: { amountSol: true },
+        }),
+        db.withdrawal.groupBy({
+          by: ['riskTier'],
+          where: { userId, source: 'AUTO_TP', status: { in: ['CONFIRMED', 'PARTIAL' as any] } },
+          _sum: { amountSol: true },
         }),
       ])
-      // Cost basis = net capital in the vault (deposits minus fees minus withdrawals).
-      // Fees never enter the vault so excluding them prevents an instant
-      // negative PnL equal to the fee amount.
-      const netDepositedByTier = new Map<string, number>()
+      const depositedByTier = new Map<string, number>()
       for (const d of depositRows) {
-        const gross = Number(d._sum.amountSol ?? 0)
-        const fee = Number(d._sum.feeSol ?? 0)
-        netDepositedByTier.set(d.riskTier, gross - fee)
-      }
-      for (const w of withdrawalRows) {
-        netDepositedByTier.set(
-          w.riskTier,
-          (netDepositedByTier.get(w.riskTier) ?? 0) - Number(w._sum.amountSol ?? 0),
+        depositedByTier.set(
+          d.riskTier,
+          Number(d._sum.amountSol ?? 0) - Number(d._sum.feeSol ?? 0),
         )
       }
+      const userWdByTier = new Map<string, number>()
+      for (const w of userWdRows) userWdByTier.set(w.riskTier, Number(w._sum.amountSol ?? 0))
+      const autoTpByTier = new Map<string, number>()
+      for (const w of autoTpWdRows) autoTpByTier.set(w.riskTier, Number(w._sum.amountSol ?? 0))
 
       const tiers = wallets.map((w) => {
         // When a wallet has zero holdings, its value is 0 — any remaining
@@ -526,20 +526,25 @@ export async function portfolioRoutes(app: FastifyInstance) {
           ? (liveByWallet.get(w.id) ??
              w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0))
           : 0
-        const costBasis = netDepositedByTier.get(w.riskTier) ?? 0
-        const realized = Number(w.realizedPnlSol)
-        // `costBasis` here is net user capital still in the vault
-        // (deposits - withdrawals). That already bakes realized cashflows
-        // into the base, so total PnL is simply current value minus net
-        // capital, and unrealized is the remainder after realized PnL.
-        const totalPnl = currentValue - costBasis
-        const unrealized = totalPnl - realized
-        const pnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0
+        const deposited = depositedByTier.get(w.riskTier) ?? 0
+        const withdrawnUser = userWdByTier.get(w.riskTier) ?? 0
+        const withdrawnAutoTp = autoTpByTier.get(w.riskTier) ?? 0
+
+        // Proportional basis: fraction of original capital still invested
+        // is currentValue / (currentValue + withdrawnUser). AUTO_TP
+        // payouts are above-basis gains, so they don't enter the denominator.
+        const paths = currentValue + withdrawnUser
+        const effectiveBasis = paths > 0 ? deposited * (currentValue / paths) : deposited
+        const basisConsumed = deposited - effectiveBasis
+        const realized = (withdrawnUser - basisConsumed) + withdrawnAutoTp
+        const unrealized = currentValue - effectiveBasis
+        const totalPnl = realized + unrealized // = currentValue + withdrawnUser + withdrawnAutoTp − deposited
+        const pnlPct = deposited > 0 ? (totalPnl / deposited) * 100 : 0
         return {
           riskTier: w.riskTier,
           walletAddress: w.address,
           currentValueSol: currentValue.toFixed(9),
-          costBasisSol: costBasis.toFixed(9),
+          costBasisSol: effectiveBasis.toFixed(9),
           realizedSol: realized.toFixed(9),
           unrealizedSol: unrealized.toFixed(9),
           totalPnlSol: totalPnl.toFixed(9),
