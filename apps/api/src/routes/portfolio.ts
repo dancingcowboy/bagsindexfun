@@ -317,8 +317,16 @@ export async function portfolioRoutes(app: FastifyInstance) {
         app.log.warn({ err }, '[reshuffle] live pricing failed — proceeding with stale values')
       }
 
-      const rebalanceCycle = await db.rebalanceCycle.create({
-        data: {
+      const rebalanceCycle = await db.rebalanceCycle.upsert({
+        where: {
+          scoringCycleId_riskTier_trigger_userId: {
+            scoringCycleId: scoringCycle.id,
+            riskTier,
+            trigger: 'USER_FORCE',
+            userId,
+          },
+        },
+        create: {
           scoringCycleId: scoringCycle.id,
           riskTier,
           trigger: 'USER_FORCE',
@@ -326,6 +334,14 @@ export async function portfolioRoutes(app: FastifyInstance) {
           walletsTotal: 1,
           shuffleSeed: `user-${userId}-${Date.now()}`,
           status: 'PROCESSING',
+        },
+        update: {
+          walletsTotal: 1,
+          walletsComplete: 0,
+          shuffleSeed: `user-${userId}-${Date.now()}`,
+          status: 'PROCESSING',
+          startedAt: new Date(),
+          completedAt: null,
         },
       })
 
