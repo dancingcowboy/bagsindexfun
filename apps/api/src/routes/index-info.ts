@@ -33,7 +33,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
       const rows = await Promise.all(
         tiers.map(async (tier) => {
           const last = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', tier, completedAt: { not: null } },
+            where: { status: 'COMPLETED', tier, source: 'BAGS', completedAt: { not: null } },
             orderBy: { completedAt: 'desc' },
             select: { completedAt: true },
           })
@@ -68,11 +68,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           ? (tierParam as (typeof allowed)[number])
           : undefined
       const latestCycle = await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED', ...(tierFilter ? { tier: tierFilter } : {}) },
+        where: { status: 'COMPLETED', source: 'BAGS', ...(tierFilter ? { tier: tierFilter } : {}) },
         orderBy: { completedAt: 'desc' },
         include: {
           scores: {
-            where: { isBlacklisted: false, ...(tierFilter ? { riskTier: tierFilter } : {}) },
+            where: { isBlacklisted: false, source: 'BAGS', ...(tierFilter ? { riskTier: tierFilter } : {}) },
             orderBy: { rank: 'asc' },
             take: 10,
           },
@@ -177,12 +177,12 @@ export async function indexInfoRoutes(app: FastifyInstance) {
   app.get('/history', async (_req, reply) => {
     try {
       const cycles = await db.scoringCycle.findMany({
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', source: 'BAGS' },
         orderBy: { completedAt: 'desc' },
         take: 30,
         include: {
           scores: {
-            where: { isBlacklisted: false },
+            where: { isBlacklisted: false, source: 'BAGS' },
             orderBy: { rank: 'asc' },
             take: 10,
           },
@@ -247,13 +247,13 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         // lookup only returns whichever tier ran last. Fall back to any
         // legacy tier-less cycle if no tier-scoped one exists yet.
         let latestCycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED', completedAt: { not: null }, tier },
+          where: { status: 'COMPLETED', source: 'BAGS', completedAt: { not: null }, tier },
           orderBy: { completedAt: 'desc' },
           select: { id: true },
         })
         if (!latestCycle) {
           latestCycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', completedAt: { not: null }, tier: null },
+            where: { status: 'COMPLETED', source: 'BAGS', completedAt: { not: null }, tier: null },
             orderBy: { completedAt: 'desc' },
             select: { id: true },
           })
@@ -424,11 +424,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         // Fall back to any legacy tier-less cycle if no tier-scoped cycle
         // exists yet.
         let cycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED', tier },
+          where: { status: 'COMPLETED', tier, source: 'BAGS' },
           orderBy: { completedAt: 'desc' },
           include: {
             scores: {
-              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 }, source: 'BAGS' },
               orderBy: { rank: 'asc' },
               select: { tokenMint: true, tokenSymbol: true, tokenName: true },
             },
@@ -436,11 +436,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         })
         if (!cycle) {
           cycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', tier: null },
+            where: { status: 'COMPLETED', tier: null, source: 'BAGS' },
             orderBy: { completedAt: 'desc' },
             include: {
               scores: {
-                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 }, source: 'BAGS' },
                 orderBy: { rank: 'asc' },
                 select: { tokenMint: true, tokenSymbol: true, tokenName: true },
               },
@@ -573,7 +573,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
       const mints = sw.holdings.map((h) => h.tokenMint)
       const scores = mints.length
         ? await db.tokenScore.findMany({
-            where: { tokenMint: { in: mints } },
+            where: { tokenMint: { in: mints }, source: 'BAGS' },
             orderBy: { scoredAt: 'desc' },
             select: { tokenMint: true, tokenSymbol: true, tokenName: true, marketCapUsd: true },
           })

@@ -183,7 +183,7 @@ export async function depositRoutes(app: FastifyInstance) {
       const mints = [...new Set(swaps.map((s) => s.outputMint))]
       const scores = mints.length
         ? await db.tokenScore.findMany({
-            where: { tokenMint: { in: mints } },
+            where: { tokenMint: { in: mints }, source: 'BAGS' },
             orderBy: { scoredAt: 'desc' },
             select: { tokenMint: true, tokenSymbol: true },
           })

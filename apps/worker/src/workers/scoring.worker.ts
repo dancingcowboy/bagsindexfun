@@ -109,7 +109,7 @@ async function processScoring(job: Job<ScoringJobData>) {
 
     // 2. Previous cycle for holder growth
     const prevCycle = await db.scoringCycle.findFirst({
-      where: { status: 'COMPLETED', id: { not: cycle.id } },
+      where: { status: 'COMPLETED', source: 'BAGS', id: { not: cycle.id } },
       orderBy: { completedAt: 'desc' },
       include: { scores: true },
     })
@@ -461,7 +461,7 @@ async function processSingleTier(
 
     // 2. Holder growth baseline = previous COMPLETED cycle for THIS tier
     const prevCycle = await db.scoringCycle.findFirst({
-      where: { status: 'COMPLETED', tier, id: { not: cycle.id } },
+      where: { status: 'COMPLETED', tier, source: 'BAGS', id: { not: cycle.id } },
       orderBy: { completedAt: 'desc' },
       include: { scores: true },
     })
@@ -480,7 +480,7 @@ async function processSingleTier(
     const excludedMints = new Set<string>()
     for (const ot of otherTiers) {
       const otherCycle = await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED', tier: ot },
+        where: { status: 'COMPLETED', tier: ot, source: 'BAGS' },
         orderBy: { completedAt: 'desc' },
         select: { id: true },
       })

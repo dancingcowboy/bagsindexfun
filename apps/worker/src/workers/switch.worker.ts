@@ -104,7 +104,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
 
     // 2. Load destination top-10 weights (latest completed scoring cycle).
     const latestCycle = await db.scoringCycle.findFirst({
-      where: { status: 'COMPLETED', tier: switchJob.toTier },
+      where: { status: 'COMPLETED', tier: switchJob.toTier, source: 'BAGS' },
       orderBy: { completedAt: 'desc' },
       include: {
         scores: {
@@ -112,6 +112,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
             isBlacklisted: false,
             riskTier: switchJob.toTier,
             rank: { gt: 0 },
+            source: 'BAGS',
           },
           orderBy: { rank: 'asc' },
           take: TOP_N_TOKENS,

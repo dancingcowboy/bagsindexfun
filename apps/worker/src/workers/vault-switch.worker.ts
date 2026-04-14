@@ -104,11 +104,11 @@ async function processVaultSwitch(job: Job<VaultSwitchJobData>) {
 
   // 2. Latest scoring cycle for destination tier
   const latestCycle = await db.scoringCycle.findFirst({
-    where: { status: 'COMPLETED', tier: toTier },
+    where: { status: 'COMPLETED', tier: toTier, source: 'BAGS' },
     orderBy: { completedAt: 'desc' },
     include: {
       scores: {
-        where: { isBlacklisted: false, riskTier: toTier, rank: { gt: 0 } },
+        where: { isBlacklisted: false, riskTier: toTier, rank: { gt: 0 }, source: 'BAGS' },
         orderBy: { rank: 'asc' },
         take: TOP_N_TOKENS,
       },

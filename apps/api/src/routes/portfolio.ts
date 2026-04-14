@@ -76,7 +76,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       }
       const scores = mints.size
         ? await db.tokenScore.findMany({
-            where: { tokenMint: { in: [...mints] } },
+            where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
             orderBy: { scoredAt: 'desc' },
             select: { tokenMint: true, tokenSymbol: true, tokenName: true, marketCapUsd: true },
           })
@@ -860,7 +860,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
 
       // Resolve symbol/name via most recent TokenScore
       const scores = await db.tokenScore.findMany({
-        where: { tokenMint: { in: [...mints] } },
+        where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
         orderBy: { scoredAt: 'desc' },
         select: { tokenMint: true, tokenSymbol: true, tokenName: true },
       })

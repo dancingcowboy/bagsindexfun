@@ -122,11 +122,11 @@ async function processAnalysis(job: Job) {
 
     for (const tier of tiers) {
       const latestCycle = await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED', tier },
+        where: { status: 'COMPLETED', tier, source: 'BAGS' },
         orderBy: { completedAt: 'desc' },
         include: {
           scores: {
-            where: { isBlacklisted: false, rank: { gt: 0 } },
+            where: { isBlacklisted: false, rank: { gt: 0 }, source: 'BAGS' },
             orderBy: { rank: 'asc' },
             take: CANDIDATES_PER_TIER,
           },

@@ -118,6 +118,7 @@ export async function processSnapshot(_job?: Job) {
         isBlacklisted: false,
         rank: { gte: 1, lte: 10 },
         scoredAt: { gte: tailStart },
+        source: 'BAGS',
       },
       select: { tokenMint: true },
     })
@@ -193,7 +194,7 @@ export async function processSnapshot(_job?: Job) {
       for (const [mint, dex] of dexPrices) {
         if (dex.marketCapUsd <= 0) continue
         const latest = await db.tokenScore.findFirst({
-          where: { tokenMint: mint },
+          where: { tokenMint: mint, source: 'BAGS' },
           orderBy: { scoredAt: 'desc' },
           select: { id: true, marketCapUsd: true },
         })

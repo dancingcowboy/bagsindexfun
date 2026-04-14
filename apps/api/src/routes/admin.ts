@@ -209,7 +209,7 @@ export async function adminRoutes(app: FastifyInstance) {
       if (mints.size === 0) return { success: true, data: { tokens: [], hours } }
 
       const scores = await db.tokenScore.findMany({
-        where: { tokenMint: { in: [...mints] } },
+        where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
         orderBy: { scoredAt: 'desc' },
         select: { tokenMint: true, tokenSymbol: true, tokenName: true },
       })
@@ -369,7 +369,7 @@ export async function adminRoutes(app: FastifyInstance) {
       if (live) for (const h of live.holdings) mints.add(h.tokenMint)
       const scores = mints.size
         ? await db.tokenScore.findMany({
-            where: { tokenMint: { in: [...mints] } },
+            where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
             orderBy: { scoredAt: 'desc' },
             select: { tokenMint: true, tokenSymbol: true, tokenName: true },
           })
@@ -904,7 +904,7 @@ export async function adminRoutes(app: FastifyInstance) {
           _sum: { totalSolReceived: true, currentValueSol: true },
         }),
         db.tokenBlacklist.count(),
-        db.scoringCycle.findFirst({ orderBy: { startedAt: 'desc' } }),
+        db.scoringCycle.findFirst({ where: { source: 'BAGS' }, orderBy: { startedAt: 'desc' } }),
         db.rebalanceCycle.findMany({
           orderBy: { startedAt: 'desc' },
           take: 6,

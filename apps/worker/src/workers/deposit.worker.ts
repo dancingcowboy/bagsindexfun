@@ -110,11 +110,11 @@ async function processDeposit(job: Job<DepositJobData>) {
   // for the tier we're allocating into, not just the most-recent cycle
   // overall.
   const latestCycle = await db.scoringCycle.findFirst({
-    where: { status: 'COMPLETED', tier: deposit.riskTier },
+    where: { status: 'COMPLETED', tier: deposit.riskTier, source: 'BAGS' },
     orderBy: { completedAt: 'desc' },
     include: {
       scores: {
-        where: { isBlacklisted: false, riskTier: deposit.riskTier, rank: { gt: 0 } },
+        where: { isBlacklisted: false, riskTier: deposit.riskTier, rank: { gt: 0 }, source: 'BAGS' },
         orderBy: { rank: 'asc' },
         take: TOP_N_TOKENS,
       },
@@ -352,7 +352,7 @@ async function processDeposit(job: Job<DepositJobData>) {
       const mints = Array.from(new Set(swaps.map((s) => s.outputMint)))
       const scoreRows = mints.length
         ? await db.tokenScore.findMany({
-            where: { tokenMint: { in: mints } },
+            where: { tokenMint: { in: mints }, source: 'BAGS' },
             select: { tokenMint: true, tokenSymbol: true },
             distinct: ['tokenMint'],
             orderBy: { scoredAt: 'desc' },

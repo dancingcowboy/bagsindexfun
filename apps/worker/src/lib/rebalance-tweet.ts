@@ -61,12 +61,13 @@ export async function postRebalanceAnnouncement(scoringCycleId: string): Promise
       where: {
         status: 'COMPLETED',
         tier,
+        source: 'BAGS',
         id: { not: cycle.id },
       },
       orderBy: { completedAt: 'desc' },
       include: {
         scores: {
-          where: { isBlacklisted: false, rank: { gt: 0 } },
+          where: { isBlacklisted: false, rank: { gt: 0 }, source: 'BAGS' },
           orderBy: { rank: 'asc' },
         },
       },

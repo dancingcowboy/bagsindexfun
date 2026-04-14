@@ -102,10 +102,14 @@ async function processRebalance(job: Job<RebalanceJobData>) {
         },
       })
     : await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED', tier: riskTier },
+        where: { status: 'COMPLETED', tier: riskTier, source: 'BAGS' },
         orderBy: { completedAt: 'desc' },
         include: {
-          scores: { where: scoreFilter, orderBy: { rank: 'asc' }, take: TOP_N_TOKENS },
+          scores: {
+            where: { ...scoreFilter, source: 'BAGS' },
+            orderBy: { rank: 'asc' },
+            take: TOP_N_TOKENS,
+          },
         },
       })
 
