@@ -508,16 +508,17 @@ export default function DashboardPage() {
                 </>
               ) : (
                 pnlData?.data?.tiers?.map((t: any) => {
-                  const value = Number(t.currentValueSol)
-                  const cost = Number(t.costBasisSol)
-                  const openPnl = value - cost
-                  const pct = cost > 0 ? (openPnl / cost) * 100 : 0
-                  const positive = openPnl >= 0
+                  // Headline is TOTAL PnL (realized + unrealized) vs original
+                  // deposited capital, not just open/unrealized. Realized cash
+                  // already left the vault and still counts toward your score.
+                  const totalPnl = Number(t.totalPnlSol)
+                  const pct = Number(t.pnlPct)
+                  const positive = totalPnl >= 0
                   return (
                     <div key={t.riskTier} className="card">
                       <div className="text-sm text-[var(--color-text-muted)] mb-1">{t.riskTier}</div>
                       <div className={`font-[family-name:var(--font-display)] text-2xl font-bold ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
-                        {positive ? '+' : ''}{openPnl.toFixed(4)} SOL
+                        {positive ? '+' : ''}{totalPnl.toFixed(4)} SOL
                       </div>
                       <div className={`text-sm ${positive ? 'text-[var(--color-accent)]' : 'text-red-400'}`}>
                         {positive ? '+' : ''}{pct.toFixed(2)}%

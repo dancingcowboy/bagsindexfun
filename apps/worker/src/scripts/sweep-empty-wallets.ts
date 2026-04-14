@@ -3,6 +3,7 @@
  * Run on server: cd /home/bagsindex/app && npx tsx apps/worker/src/scripts/sweep-empty-wallets.ts
  */
 import { getNativeSolBalanceLamports, transferSolFromServerWallet } from '@bags-index/solana'
+import { db } from '@bags-index/db'
 
 const USER_WALLET = 'HF6jdrUj1iVdXBB15pZQBQXtebsFWimn2czN7cQgdmbS'
 // Rent-exempt minimum (890,880) + tx fee (5,000) — sender must retain this
@@ -37,6 +38,36 @@ async function main() {
       })
       console.log(`[sweep] OK → ${sig}`)
       totalSwept += sendable
+
+      // Accounting cleanup — record as a USER withdrawal so /portfolio/pnl
+      // counts the swept SOL correctly and a future re-deposit doesn't stack
+      // on top of stale cost basis.
+      const sw = await db.subWallet.findFirst({
+        where: { address: w.address },
+        select: { id: true, userId: true, riskTier: true },
+      })
+      if (sw) {
+        await db.withdrawal.create({
+          data: {
+            userId: sw.userId,
+            riskTier: sw.riskTier,
+            amountSol: (Number(sendable) / 1e9).toFixed(9),
+            feeSol: '0',
+            txSignature: sig,
+            status: 'CONFIRMED',
+            source: 'USER',
+            confirmedAt: new Date(),
+          },
+        })
+        await db.holding.deleteMany({ where: { subWalletId: sw.id } })
+        await db.subWallet.update({
+          where: { id: sw.id },
+          data: { realizedPnlSol: '0' },
+        })
+        console.log(`[sweep] recorded Withdrawal + cleared holdings for ${w.address.slice(0, 8)}`)
+      } else {
+        console.warn(`[sweep] WARN: no sub_wallet row for ${w.address} — accounting NOT recorded`)
+      }
     } catch (err) {
       console.error(`[sweep] ${w.tier} failed:`, err)
     }
