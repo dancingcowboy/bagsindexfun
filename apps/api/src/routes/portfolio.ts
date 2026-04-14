@@ -292,6 +292,31 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return reply.status(503).send({ error: 'No scoring data yet — try later' })
       }
 
+      // Refresh valueSolEst for this wallet's holdings before enqueueing.
+      // reconcile.ts inserts new rows with valueSolEst=0 and the price-snapshot
+      // worker only runs hourly, so a wallet that just saw a withdrawal or
+      // deposit can look "empty" to the rebalance worker even when it holds
+      // sizeable positions. Pricing in the request path (a few hundred ms)
+      // guarantees the worker sees non-zero totalValueSol and actually swaps.
+      try {
+        const { getLiveHoldings } = await import('@bags-index/solana')
+        const live = await getLiveHoldings(wallet.address)
+        const byMint = new Map(live.holdings.map((h) => [h.tokenMint, h.valueSol]))
+        const dbHoldings = await db.holding.findMany({
+          where: { subWalletId: wallet.id },
+        })
+        await Promise.all(
+          dbHoldings.map((h) =>
+            db.holding.update({
+              where: { id: h.id },
+              data: { valueSolEst: (byMint.get(h.tokenMint) ?? 0).toFixed(9) },
+            }),
+          ),
+        )
+      } catch (err) {
+        app.log.warn({ err }, '[reshuffle] live pricing failed — proceeding with stale values')
+      }
+
       const rebalanceCycle = await db.rebalanceCycle.create({
         data: {
           scoringCycleId: scoringCycle.id,
