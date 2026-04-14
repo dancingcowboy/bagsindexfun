@@ -212,8 +212,12 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
       // will still be marked PARTIAL below if any sells failed, so retry
       // semantics remain intact — but the user gets their SOL now.
       const balanceLamports = await getNativeSolBalanceLamports(subWallet.address)
-      // Rent-exempt minimum (890,880) + tx fee (5,000)
-      const SWEEP_RESERVE = 900_000n
+      // Rent-exempt minimum (890,880) + tx fee (5,000) leaves zero headroom.
+      // If ANY sell later needs to be retried, Jupiter creates a transient
+      // wSOL ATA (~2.04M lamports rent) which would revert pre-execution on
+      // a barely-rent-exempt wallet. Reserve 10M (~0.01 SOL) so the wallet
+      // can still liquidate stuck tokens on a follow-up attempt.
+      const SWEEP_RESERVE = 10_000_000n
       sendable = balanceLamports > SWEEP_RESERVE ? balanceLamports - SWEEP_RESERVE : 0n
     } else {
       const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
