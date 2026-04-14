@@ -83,18 +83,44 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
 
     const sellFraction = isPartial ? pct / 100 : 1
 
-    try {
-      const { txBytes, quote, route } = await buildSellTransaction({
-        tokenMint: holding.tokenMint,
-        tokenAmount: sellAmount,
-        userPublicKey: subWallet.address,
-      })
+    // Retry the build+sign+submit path up to 3 times for transient
+    // errors (Bags/Jupiter 429s, quote stalls, confirmation timeouts).
+    // Each attempt rebuilds the tx so it gets a fresh blockhash —
+    // submitAndConfirm itself never re-submits.
+    const MAX_ATTEMPTS = 3
+    let sellResult: { sig: string; outAmount: string | number; slippageBps: number; route: any } | null = null
+    let lastErr: any = null
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS && !sellResult; attempt++) {
+      try {
+        const { txBytes, quote, route } = await buildSellTransaction({
+          tokenMint: holding.tokenMint,
+          tokenAmount: sellAmount,
+          userPublicKey: subWallet.address,
+        })
+        const signed = await signVersionedTxBytes({
+          walletId: subWallet.privyWalletId,
+          txBytes,
+        })
+        const sig = await submitAndConfirm(signed)
+        sellResult = { sig, outAmount: quote.outAmount, slippageBps: quote.slippageBps, route }
+      } catch (err: any) {
+        lastErr = err
+        const detail = err?.response?.status
+          ? `HTTP ${err.response.status}`
+          : err?.message ?? String(err)
+        logger.error(
+          `[withdrawal] sell attempt ${attempt}/${MAX_ATTEMPTS} failed for ${holding.tokenMint.slice(0, 8)}…: ${detail}`,
+        )
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 5_000 * attempt))
+        }
+      }
+    }
 
-      const signed = await signVersionedTxBytes({
-        walletId: subWallet.privyWalletId,
-        txBytes,
-      })
-      const sig = await submitAndConfirm(signed)
+    try {
+      if (!sellResult) throw lastErr ?? new Error('sell failed')
+      const { sig, outAmount, slippageBps, route } = sellResult
+      const quote = { outAmount, slippageBps }
 
       totalRecoveredLamports += BigInt(quote.outAmount)
 

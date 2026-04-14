@@ -232,13 +232,43 @@ export async function buildSellTransaction(params: {
  * Submit a signed transaction with Jito MEV protection via Helius Sender,
  * then wait for confirmation on the standard RPC.
  */
-export async function submitAndConfirm(signedTxBytes: Uint8Array): Promise<string> {
+export async function submitAndConfirm(
+  signedTxBytes: Uint8Array,
+  opts?: { timeoutMs?: number },
+): Promise<string> {
   const connection = getConnection()
   const tx = VersionedTransaction.deserialize(signedTxBytes)
   const base64 = Buffer.from(tx.serialize()).toString('base64')
   const signature = await sendJitoProtected(base64)
-  await connection.confirmTransaction(signature, 'confirmed')
-  return signature
+
+  // Poll signature status instead of relying on confirmTransaction's 30s
+  // blockhash-bound timeout — Solana congestion often lands txs 30-90s
+  // after submission. Never re-submit here (avoids double-spend); if the
+  // caller wants to retry, it must build a fresh tx with a new blockhash.
+  const timeoutMs = opts?.timeoutMs ?? 90_000
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const { value } = await connection.getSignatureStatuses([signature])
+      const status = value[0]
+      if (status?.err) {
+        throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.err)}`)
+      }
+      if (
+        status?.confirmationStatus === 'confirmed' ||
+        status?.confirmationStatus === 'finalized'
+      ) {
+        return signature
+      }
+    } catch (err: any) {
+      if (err?.message?.startsWith('Transaction failed on-chain')) throw err
+      // transient RPC error — keep polling
+    }
+    await new Promise((r) => setTimeout(r, 3_000))
+  }
+  throw new Error(
+    `Transaction ${signature} not confirmed in ${Math.round(timeoutMs / 1000)}s`,
+  )
 }
 
 /**
