@@ -5,7 +5,7 @@ import {
   createSwitchSchema,
 } from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
-import { switchQueue } from '../queue/queues.js'
+import { rebalanceQueue, switchQueue } from '../queue/queues.js'
 
 export async function portfolioRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth)
@@ -240,6 +240,92 @@ export async function portfolioRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to create switch job')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /portfolio/reshuffle
+   * Force an immediate single-wallet rebalance for the caller's vault of the
+   * given tier. Reuses the rebalance worker's per-wallet branch by enqueueing
+   * a job with `walletId` set. Server-enforced 1-hour cooldown per wallet.
+   *
+   * Auth: requireAuth preHandler (registered on the router).
+   * Ownership: sub-wallet looked up via composite `(userId, riskTier)` —
+   * caller can only touch their own vault.
+   */
+  app.post<{ Body: { riskTier?: string } }>('/reshuffle', async (req, reply) => {
+    try {
+      const userId = req.authUser!.userId
+      const tier = req.body?.riskTier
+      if (!tier || !RISK_TIERS.includes(tier as any)) {
+        return reply.status(400).send({ error: 'Invalid tier' })
+      }
+      const riskTier = tier as 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+
+      const wallet = await db.subWallet.findUnique({
+        where: { userId_riskTier: { userId, riskTier } },
+      })
+      if (!wallet) {
+        return reply.status(404).send({ error: 'No vault for tier' })
+      }
+
+      const COOLDOWN_MS = 60 * 60 * 1000
+      if (
+        wallet.lastForceRebalanceAt &&
+        Date.now() - wallet.lastForceRebalanceAt.getTime() < COOLDOWN_MS
+      ) {
+        const remainingMin = Math.ceil(
+          (COOLDOWN_MS - (Date.now() - wallet.lastForceRebalanceAt.getTime())) /
+            60000,
+        )
+        return reply
+          .status(429)
+          .send({ error: `Cooldown active — try again in ${remainingMin} min` })
+      }
+
+      const scoringCycle = await db.scoringCycle.findFirst({
+        where: { status: 'COMPLETED', tier: riskTier, source: 'BAGS' },
+        orderBy: { completedAt: 'desc' },
+      })
+      if (!scoringCycle) {
+        return reply.status(503).send({ error: 'No scoring data yet — try later' })
+      }
+
+      const rebalanceCycle = await db.rebalanceCycle.create({
+        data: {
+          scoringCycleId: scoringCycle.id,
+          riskTier,
+          trigger: 'USER_FORCE',
+          userId,
+          walletsTotal: 1,
+          shuffleSeed: `user-${userId}-${Date.now()}`,
+          status: 'PROCESSING',
+        },
+      })
+
+      await db.subWallet.update({
+        where: { id: wallet.id },
+        data: { lastForceRebalanceAt: new Date() },
+      })
+
+      await rebalanceQueue.add(
+        `user-reshuffle-${wallet.id}`,
+        {
+          walletId: wallet.id,
+          riskTier,
+          rebalanceCycleId: rebalanceCycle.id,
+          scoringCycleId: scoringCycle.id,
+        },
+        { priority: 1, removeOnComplete: 100, removeOnFail: 100 },
+      )
+
+      return {
+        success: true,
+        data: { rebalanceCycleId: rebalanceCycle.id, status: 'queued' },
+      }
+    } catch (err) {
+      app.log.error(err, 'Failed to enqueue user-force reshuffle')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })

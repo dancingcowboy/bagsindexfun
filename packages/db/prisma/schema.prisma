@@ -35,6 +35,7 @@ model SubWallet {
   address       String          @unique
   riskTier      RiskTier        @map("risk_tier")
   realizedPnlSol Decimal        @default(0) @map("realized_pnl_sol") @db.Decimal(20, 9)
+  lastForceRebalanceAt DateTime? @map("last_force_rebalance_at")
   createdAt     DateTime        @default(now()) @map("created_at")
   user          User            @relation(fields: [userId], references: [id])
   holdings      Holding[]
@@ -200,10 +201,13 @@ model ScoringCycle {
   /// Which tier this cycle scored. NULL on legacy rows that scored all tiers
   /// in one pass; new rows always set a single tier.
   tier            RiskTier?        @map("tier")
+  /// Token universe source: "BAGS" (default) | "DEXSCREENER" (admin hotlist)
+  source          String           @default("BAGS")
   scores          TokenScore[]
   rebalanceCycles RebalanceCycle[]
 
   @@index([tier, completedAt])
+  @@index([source, tier, completedAt])
   @@map("scoring_cycles")
 }
 
@@ -226,11 +230,14 @@ model TokenScore {
   /** Layer-A agent safety review: PASS | REMOVED | null (not reviewed) */
   safetyVerdict   String?      @map("safety_verdict")
   safetyReason    String?      @map("safety_reason")
+  /// Token universe source: "BAGS" (default) | "DEXSCREENER"
+  source          String       @default("BAGS")
   scoredAt        DateTime     @default(now()) @map("scored_at")
   cycle           ScoringCycle @relation(fields: [cycleId], references: [id])
 
   @@unique([cycleId, riskTier, tokenMint])
   @@index([cycleId, riskTier, rank])
+  @@index([source, cycleId])
   @@map("token_scores")
 }
 
@@ -247,10 +254,14 @@ model RebalanceCycle {
   walletsComplete Int             @default(0) @map("wallets_complete")
   walletsFailed   Int             @default(0) @map("wallets_failed")
   shuffleSeed     String          @map("shuffle_seed")
+  /// "AUTO" = scheduled tier-wide rebalance | "USER_FORCE" = user-triggered per-wallet reshuffle
+  trigger         String          @default("AUTO")
+  /// Set only for USER_FORCE rows — identifies the user who triggered the reshuffle.
+  userId          String?         @map("user_id")
   scoringCycle    ScoringCycle    @relation(fields: [scoringCycleId], references: [id])
   executions      SwapExecution[]
 
-  @@unique([scoringCycleId, riskTier])
+  @@unique([scoringCycleId, riskTier, trigger, userId])
   @@index([riskTier, startedAt])
   @@map("rebalance_cycles")
 }

@@ -93,6 +93,16 @@ class ApiClient {
     return this.fetch<{ data: any[] }>('/portfolio/switches')
   }
 
+  forceReshuffle(riskTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN') {
+    return this.fetch<{ data: { rebalanceCycleId: string; status: string } }>(
+      '/portfolio/reshuffle',
+      {
+        method: 'POST',
+        body: JSON.stringify({ riskTier }),
+      },
+    )
+  }
+
   // Deposits
   createDeposit(
     amountSol: number,

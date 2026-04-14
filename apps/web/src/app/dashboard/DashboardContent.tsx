@@ -131,6 +131,35 @@ export default function DashboardPage() {
     } catch {}
   }
 
+  // Per-tier loading + transient message for "Force Reshuffle" buttons.
+  const [reshufflingTier, setReshufflingTier] = useState<string | null>(null)
+  const [reshuffleMsg, setReshuffleMsg] = useState<Record<string, string>>({})
+  const handleForceReshuffle = async (
+    tier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+  ) => {
+    if (
+      !confirm(
+        `Force reshuffle your ${tier} vault now?\n\nThis sells anything no longer in the top-10 and rebuys the current ranking. 1-hour cooldown after.`,
+      )
+    )
+      return
+    setReshufflingTier(tier)
+    setReshuffleMsg((s) => ({ ...s, [tier]: '' }))
+    try {
+      await api.forceReshuffle(tier)
+      setReshuffleMsg((s) => ({ ...s, [tier]: 'Queued — refresh in ~1 min' }))
+      setTimeout(() => refetchPortfolio(), 60_000)
+    } catch (e: any) {
+      setReshuffleMsg((s) => ({ ...s, [tier]: e?.message || 'Failed' }))
+    } finally {
+      setReshufflingTier(null)
+      setTimeout(
+        () => setReshuffleMsg((s) => ({ ...s, [tier]: '' })),
+        8000,
+      )
+    }
+  }
+
   useEffect(() => {
     if (ready && !authenticated) router.push('/')
   }, [ready, authenticated, router])
@@ -707,6 +736,30 @@ export default function DashboardPage() {
                             </button>
                           </div>
                         )}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleForceReshuffle(t.riskTier)}
+                            disabled={reshufflingTier === t.riskTier}
+                            className="rounded-md border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors hover:bg-white/5 disabled:opacity-50"
+                            style={{ borderColor: c.border, color: c.text }}
+                            title="Sell anything no longer in the top-10 and rebuy current ranking. 1-hour cooldown."
+                          >
+                            <RefreshCw
+                              className={`mr-1 inline h-3 w-3 ${
+                                reshufflingTier === t.riskTier ? 'animate-spin' : ''
+                              }`}
+                            />
+                            {reshufflingTier === t.riskTier
+                              ? 'Queuing…'
+                              : 'Force Reshuffle'}
+                          </button>
+                          {reshuffleMsg[t.riskTier] && (
+                            <span className="text-[10px] text-[var(--color-text-muted)]">
+                              {reshuffleMsg[t.riskTier]}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       {/* Mobile card layout */}
                       <div className="md:hidden divide-y" style={{ borderColor: c.border }}>
