@@ -189,12 +189,33 @@ export default function DashboardPage() {
     refetchInterval: 60_000,
   })
 
-  const { data: pnlData, isLoading: pnlLoading } = useQuery({
+  const { data: pnlData, isLoading: pnlLoading, refetch: refetchPnl } = useQuery({
     queryKey: ['pnl'],
     queryFn: () => api.getPnl(),
     enabled: authenticated,
     refetchInterval: 30_000,
   })
+
+  // Per-tier auto-TP lookup (pct 0..100) sourced from /portfolio/pnl.
+  const autoTpByTier: Record<string, number> = {}
+  for (const pt of (pnlData?.data?.tiers as any[]) ?? []) {
+    autoTpByTier[pt.riskTier] = Number(pt.autoTakeProfitPct ?? 0)
+  }
+  const [tpPending, setTpPending] = useState<string | null>(null)
+  const handleSetAutoTp = async (
+    tier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+    pct: number,
+  ) => {
+    setTpPending(`${tier}:${pct}`)
+    try {
+      await api.setAutoTakeProfit(tier, pct)
+      await refetchPnl()
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update auto-TP')
+    } finally {
+      setTpPending(null)
+    }
+  }
 
 
   // Portfolio API returns tiers[], each with its own holdings[]. Flatten
@@ -760,6 +781,46 @@ export default function DashboardPage() {
                             </span>
                           )}
                         </div>
+                      </div>
+                      {/* Auto Take-Profit presets — 0% = full compound (default). */}
+                      <div
+                        className="px-5 py-3 text-xs"
+                        style={{ borderBottom: `1px solid ${c.border}` }}
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="uppercase tracking-wider text-[var(--color-text-muted)]">
+                            Auto Take-Profit
+                          </span>
+                          <span
+                            className="font-[family-name:var(--font-mono)]"
+                            style={{ color: c.text }}
+                          >
+                            {autoTpByTier[t.riskTier] ?? 0}%
+                          </span>
+                        </div>
+                        <div className="flex gap-1">
+                          {[0, 25, 50, 75, 100].map((pct) => {
+                            const isCurrent = (autoTpByTier[t.riskTier] ?? 0) === pct
+                            const isBusy = tpPending === `${t.riskTier}:${pct}`
+                            return (
+                              <button
+                                key={pct}
+                                type="button"
+                                disabled={tpPending !== null}
+                                onClick={() => handleSetAutoTp(t.riskTier, pct)}
+                                className={`flex-1 rounded-md border px-2 py-1 font-semibold transition-colors disabled:opacity-50 ${
+                                  isCurrent ? 'bg-white/10' : 'hover:bg-white/5'
+                                }`}
+                                style={{ borderColor: c.border, color: c.text }}
+                              >
+                                {isBusy ? '…' : pct === 0 ? 'Off' : `${pct}%`}
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <p className="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          After each scheduled rebalance, {autoTpByTier[t.riskTier] ?? 0}% of any SOL surplus is sent to your connected wallet. 0% = compound.
+                        </p>
                       </div>
                       {/* Mobile card layout */}
                       <div className="md:hidden divide-y" style={{ borderColor: c.border }}>

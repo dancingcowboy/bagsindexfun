@@ -372,6 +372,55 @@ export async function portfolioRoutes(app: FastifyInstance) {
   })
 
   /**
+   * PUT /portfolio/auto-tp
+   * Update the auto-take-profit percentage for one tier (0–100).
+   * 0 = compound. 100 = withdraw all surplus each AUTO cycle.
+   */
+  app.put<{ Body: { riskTier?: string; pct?: number } }>(
+    '/auto-tp',
+    async (req, reply) => {
+      try {
+        const userId = req.authUser!.userId
+        const { riskTier, pct } = req.body ?? {}
+        if (!riskTier || !RISK_TIERS.includes(riskTier as any)) {
+          return reply.status(400).send({ error: 'Invalid tier' })
+        }
+        if (
+          typeof pct !== 'number' ||
+          !Number.isInteger(pct) ||
+          pct < 0 ||
+          pct > 100
+        ) {
+          return reply.status(400).send({ error: 'pct must be integer 0..100' })
+        }
+        const tier = riskTier as 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+        const wallet = await db.subWallet.findUnique({
+          where: { userId_riskTier: { userId, riskTier: tier } },
+        })
+        if (!wallet) {
+          return reply.status(404).send({ error: 'No vault for tier' })
+        }
+        if (pct > 0) {
+          const user = await db.user.findUnique({ where: { id: userId } })
+          if (!user?.walletAddress) {
+            return reply
+              .status(400)
+              .send({ error: 'Connect a wallet address first' })
+          }
+        }
+        await db.subWallet.update({
+          where: { id: wallet.id },
+          data: { autoTakeProfitPct: pct },
+        })
+        return { success: true, data: { riskTier: tier, pct } }
+      } catch (err) {
+        app.log.error(err, 'Failed to update auto-TP')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * GET /portfolio/switches
    * List the authenticated user's switch history (ownership-scoped).
    */
@@ -495,6 +544,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
           unrealizedSol: unrealized.toFixed(9),
           totalPnlSol: totalPnl.toFixed(9),
           pnlPct: pnlPct.toFixed(2),
+          autoTakeProfitPct: w.autoTakeProfitPct,
         }
       })
       const totals = tiers.reduce(

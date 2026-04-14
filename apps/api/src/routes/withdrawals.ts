@@ -224,10 +224,12 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         success: true,
         data: withdrawals.map((w) => ({
           id: w.id,
+          riskTier: w.riskTier,
           amountSol: w.amountSol.toString(),
           feeSol: w.feeSol.toString(),
           txSignature: w.txSignature,
           status: w.status,
+          source: w.source,
           createdAt: w.createdAt,
           confirmedAt: w.confirmedAt,
         })),

@@ -103,6 +103,19 @@ class ApiClient {
     )
   }
 
+  setAutoTakeProfit(
+    riskTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+    pct: number,
+  ) {
+    return this.fetch<{ data: { riskTier: string; pct: number } }>(
+      '/portfolio/auto-tp',
+      {
+        method: 'PUT',
+        body: JSON.stringify({ riskTier, pct }),
+      },
+    )
+  }
+
   // Deposits
   createDeposit(
     amountSol: number,

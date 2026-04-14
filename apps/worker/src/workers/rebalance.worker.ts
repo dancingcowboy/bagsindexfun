@@ -5,8 +5,10 @@ import {
   buildBuyTransaction,
   buildSellTransaction,
   capInputToLiquidity,
+  getNativeSolBalanceLamports,
   signVersionedTxBytes,
   submitAndConfirm,
+  transferSolFromServerWallet,
 } from '@bags-index/solana'
 import {
   QUEUE_REBALANCE,
@@ -16,6 +18,7 @@ import {
   TIER_SCORING_CONFIG,
   BAGSX_MINT,
   BAGSX_WEIGHT_PCT,
+  WALLET_RESERVE_SOL,
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { postRebalanceAnnouncement } from '../lib/rebalance-tweet.js'
@@ -236,6 +239,28 @@ async function processSingleWallet(
   // Fixed platform-token exposure — identical for user and system vaults.
   targetWeights.set(BAGSX_MINT, bagsxWeight)
 
+  // Auto take-profit baseline — captured BEFORE any sells so we can
+  // compute this cycle's SOL surplus and (optionally) pay it out at the
+  // end. Only AUTO cycles are eligible; USER_FORCE reshuffles never
+  // trigger surprise payouts during active user interaction.
+  const isAutoCycle = cycle.trigger === 'AUTO'
+  const tpPct = wallet.autoTakeProfitPct ?? 0
+  const tpEligible = isAutoCycle && tpPct > 0
+  const tpUser = tpEligible
+    ? await db.user.findUnique({ where: { id: wallet.userId } })
+    : null
+  const tpActive = tpEligible && !!tpUser?.walletAddress
+  let baselineLamports: bigint | null = null
+  if (tpActive) {
+    try {
+      baselineLamports = await getNativeSolBalanceLamports(wallet.address)
+    } catch (err: any) {
+      logger.error(
+        `[rebalance/tp] baseline read failed ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
+      )
+    }
+  }
+
   let success = true
   try {
     const totalValueSol = wallet.holdings.reduce(
@@ -437,6 +462,70 @@ async function processSingleWallet(
   } catch (err) {
     success = false
     logger.error(`[rebalance/wallet] ${wallet.address.slice(0, 8)} failed: ${err}`)
+  }
+
+  // Auto take-profit payout — runs only when the rebalance succeeded,
+  // the wallet opted in (tpPct > 0), and a baseline was captured. The
+  // payout is the user-configured percentage of the native-SOL delta
+  // across the cycle, capped so WALLET_RESERVE_SOL stays for gas.
+  if (tpActive && baselineLamports !== null && success) {
+    try {
+      const finalLamports = await getNativeSolBalanceLamports(wallet.address)
+      const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
+      const rawSurplus = finalLamports - baselineLamports
+      const headroom =
+        finalLamports > reserveLamports ? finalLamports - reserveLamports : 0n
+      let payout = 0n
+      if (rawSurplus > 0n) {
+        const scaled = (rawSurplus * BigInt(tpPct)) / 100n
+        payout = scaled > headroom ? headroom : scaled
+      }
+      const MIN_PAYOUT = 1_000_000n // 0.001 SOL floor — tx fee would eat dust
+      if (payout >= MIN_PAYOUT) {
+        const w = await db.withdrawal.create({
+          data: {
+            userId: wallet.userId,
+            riskTier: wallet.riskTier,
+            amountSol: (Number(payout) / LAMPORTS_PER_SOL).toFixed(9),
+            feeSol: '0',
+            status: 'PENDING',
+            source: 'AUTO_TP',
+          },
+        })
+        try {
+          const sig = await transferSolFromServerWallet({
+            fromPrivyWalletId: wallet.privyWalletId,
+            fromAddress: wallet.address,
+            toAddress: tpUser!.walletAddress,
+            lamports: payout,
+          })
+          await db.withdrawal.update({
+            where: { id: w.id },
+            data: {
+              status: 'CONFIRMED',
+              txSignature: sig,
+              confirmedAt: new Date(),
+            },
+          })
+          logger.info(
+            `[rebalance/tp] ${wallet.address.slice(0, 8)} paid ${payout} lamports (${tpPct}%) -> ${sig}`,
+          )
+        } catch (err: any) {
+          await db.withdrawal.update({
+            where: { id: w.id },
+            data: { status: 'FAILED' },
+          })
+          logger.error(
+            `[rebalance/tp] transfer failed ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
+          )
+          // Swallowed on purpose — swaps already landed, surplus compounds.
+        }
+      }
+    } catch (err: any) {
+      logger.error(
+        `[rebalance/tp] payout step threw ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
+      )
+    }
   }
 
   await bumpAndMaybeFinish(cycle.id, success, logger, cycle.scoringCycleId)

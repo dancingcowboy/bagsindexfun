@@ -36,6 +36,8 @@ model SubWallet {
   riskTier      RiskTier        @map("risk_tier")
   realizedPnlSol Decimal        @default(0) @map("realized_pnl_sol") @db.Decimal(20, 9)
   lastForceRebalanceAt DateTime? @map("last_force_rebalance_at")
+  /// 0 = compound all surplus (default). 100 = withdraw all surplus on every AUTO cycle.
+  autoTakeProfitPct Int         @default(0) @map("auto_take_profit_pct")
   createdAt     DateTime        @default(now()) @map("created_at")
   user          User            @relation(fields: [userId], references: [id])
   holdings      Holding[]
@@ -183,6 +185,8 @@ model Withdrawal {
   status      TxStatus    @default(PENDING)
   createdAt   DateTime    @default(now()) @map("created_at")
   confirmedAt DateTime?   @map("confirmed_at")
+  /// "USER" (default, user-initiated liquidation) | "AUTO_TP" (rebalance surplus payout)
+  source      String      @default("USER")
   user        User        @relation(fields: [userId], references: [id])
 
   @@index([userId])
