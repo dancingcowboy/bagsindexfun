@@ -28,11 +28,15 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'No holdings to withdraw' })
       }
 
+      // Block only on PENDING (actively running). PARTIAL is terminal —
+      // holdings have moved on (rebalances), so a new withdrawal against
+      // current vault state is the right UX. Old PARTIAL rows remain in
+      // history and can still be retried explicitly via /:id/retry.
       const inflight = await db.withdrawal.findFirst({
         where: {
           userId,
           riskTier,
-          status: { in: ['PENDING', 'PARTIAL'] },
+          status: 'PENDING',
         },
       })
       if (inflight) {
