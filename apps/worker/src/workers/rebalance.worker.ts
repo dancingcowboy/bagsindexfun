@@ -318,9 +318,23 @@ async function processSingleWallet(
       await bumpAndMaybeFinish(cycle.id, true, logger, cycle.scoringCycleId)
       return
     }
-    // Shrink the target pool so the rebalance naturally produces
-    // `tpAmount` of free SOL (sells outpace buys by that margin).
-    const totalValueSol = Math.max(0.000001, tokenValueSol - tpAmount)
+    // Include deployable native SOL in the rebalance base. Without this,
+    // surplus from prior cycles (sells that outpaced buys) sits idle
+    // forever because target weights only distribute the currently-held
+    // token value. Reserve WALLET_RESERVE_SOL for tx fees; subtract
+    // tpAmount so that much SOL survives the rebalance for payout.
+    const nativeLamportsNow = await getNativeSolBalanceLamports(wallet.address)
+    const nativeSolNow = Number(nativeLamportsNow) / LAMPORTS_PER_SOL
+    const deployableNativeSol = Math.max(0, nativeSolNow - WALLET_RESERVE_SOL)
+    const totalValueSol = Math.max(
+      0.000001,
+      tokenValueSol + deployableNativeSol - tpAmount,
+    )
+    if (deployableNativeSol > 0.01) {
+      logger.info(
+        `[rebalance/wallet] ${wallet.address.slice(0, 8)} deploying ${deployableNativeSol.toFixed(4)} idle SOL into basket`,
+      )
+    }
 
     const currentAllocations = new Map(
       wallet.holdings.map((h) => [
