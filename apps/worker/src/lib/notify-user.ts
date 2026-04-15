@@ -53,6 +53,18 @@ async function tokenSymbols(mints: string[]): Promise<Map<string, string | null>
   return out
 }
 
+function signed(n: number, digits = 3): string {
+  const v = n.toFixed(digits)
+  return n >= 0 ? `+${v}` : v
+}
+
+function pnlPctStr(pnl: number, cost: number): string {
+  if (cost <= 0) return '—'
+  const pct = (pnl / cost) * 100
+  const s = pct.toFixed(2)
+  return pct >= 0 ? `+${s}%` : `${s}%`
+}
+
 function formatTierDetail(
   tier: RiskTier,
   summary: Awaited<ReturnType<typeof buildUserPortfolioSummary>>,
@@ -66,7 +78,11 @@ function formatTierDetail(
   })
   const extra = t.holdings.length - maxLines
   const more = extra > 0 ? `\n• …+${extra} more` : ''
-  return `<b>${tier}: ${t.totalValueSol.toFixed(3)} SOL</b> (${t.holdings.length} holdings)\n${lines.join('\n')}${more}`
+  const pnlEmoji = t.totalPnlSol >= 0 ? '📈' : '📉'
+  const pnlLine =
+    `${pnlEmoji} PnL ${signed(t.totalPnlSol)} SOL (${pnlPctStr(t.totalPnlSol, t.costBasisSol)})` +
+    ` · cost ${t.costBasisSol.toFixed(3)} · real ${signed(t.realizedPnlSol)} · unreal ${signed(t.unrealizedPnlSol)}`
+  return `<b>${tier}: ${t.totalValueSol.toFixed(3)} SOL</b> (${t.holdings.length} holdings)\n${pnlLine}\n${lines.join('\n')}${more}`
 }
 
 function formatOthersLine(
@@ -75,9 +91,9 @@ function formatOthersLine(
 ): string {
   const others = summary.tiers
     .filter((t) => t.riskTier !== affectedTier)
-    .map((t) => `${t.riskTier} ${t.totalValueSol.toFixed(2)} SOL`)
-  const line = others.length > 0 ? `Other: ${others.join(' · ')} · ` : ''
-  return `${line}Total ${summary.totalValueSol.toFixed(2)} SOL`
+    .map((t) => `${t.riskTier} ${t.totalValueSol.toFixed(2)} (${signed(t.totalPnlSol, 2)})`)
+  const line = others.length > 0 ? `Other: ${others.join(' · ')}\n` : ''
+  return `${line}<b>Total ${summary.totalValueSol.toFixed(2)} SOL · PnL ${signed(summary.totalPnlSol, 2)} SOL (${pnlPctStr(summary.totalPnlSol, summary.totalCostBasisSol)})</b>`
 }
 
 export async function notifyRebalance(params: {

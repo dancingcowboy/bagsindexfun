@@ -11,12 +11,24 @@ export interface SummaryTier {
   riskTier: RiskTier
   walletAddress: string
   totalValueSol: number
+  /** Sum of holding cost basis in SOL (DB-tracked, proportionally scaled). */
+  costBasisSol: number
+  /** Realized PnL already paid out / compounded. */
+  realizedPnlSol: number
+  /** totalValueSol − costBasisSol (open position PnL). */
+  unrealizedPnlSol: number
+  /** realizedPnlSol + unrealizedPnlSol. */
+  totalPnlSol: number
   holdings: SummaryHolding[]
 }
 
 export interface PortfolioSummary {
   tiers: SummaryTier[]
   totalValueSol: number
+  totalCostBasisSol: number
+  totalRealizedPnlSol: number
+  totalUnrealizedPnlSol: number
+  totalPnlSol: number
 }
 
 /**
@@ -54,10 +66,18 @@ export async function buildUserPortfolioSummary(userId: string): Promise<Portfol
       .filter((h) => h.valueSol > 0)
       .sort((a, b) => b.valueSol - a.valueSol)
     const totalValueSol = holdings.reduce((s, h) => s + h.valueSol, 0)
+    const costBasisSol = w.holdings.reduce((s, h) => s + Number(h.costBasisSol ?? 0), 0)
+    const realizedPnlSol = Number(w.realizedPnlSol ?? 0)
+    const unrealizedPnlSol = totalValueSol - costBasisSol
+    const totalPnlSol = realizedPnlSol + unrealizedPnlSol
     return {
       riskTier: w.riskTier,
       walletAddress: w.address,
       totalValueSol,
+      costBasisSol,
+      realizedPnlSol,
+      unrealizedPnlSol,
+      totalPnlSol,
       holdings,
     }
   })
@@ -65,5 +85,9 @@ export async function buildUserPortfolioSummary(userId: string): Promise<Portfol
   return {
     tiers,
     totalValueSol: tiers.reduce((s, t) => s + t.totalValueSol, 0),
+    totalCostBasisSol: tiers.reduce((s, t) => s + t.costBasisSol, 0),
+    totalRealizedPnlSol: tiers.reduce((s, t) => s + t.realizedPnlSol, 0),
+    totalUnrealizedPnlSol: tiers.reduce((s, t) => s + t.unrealizedPnlSol, 0),
+    totalPnlSol: tiers.reduce((s, t) => s + t.totalPnlSol, 0),
   }
 }
