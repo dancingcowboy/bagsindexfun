@@ -612,6 +612,7 @@ async function bumpAndMaybeFinish(
       walletsFailed: true,
       status: true,
       riskTier: true,
+      trigger: true,
     },
   })
   if (updated.status === 'COMPLETED') return
@@ -623,10 +624,14 @@ async function bumpAndMaybeFinish(
     logger.info(
       `[rebalance/${updated.riskTier}] cycle complete: ${updated.walletsComplete} ok, ${updated.walletsFailed} failed`,
     )
-    try {
-      await postRebalanceAnnouncement(scoringCycleId)
-    } catch (err) {
-      logger.error(`[rebalance] tweet failed: ${err}`)
+    // Only announce AUTO cycles. USER_FORCE reshuffles are single-wallet
+    // personal actions — no global composition change, don't spam the group.
+    if (updated.trigger === 'AUTO') {
+      try {
+        await postRebalanceAnnouncement(scoringCycleId)
+      } catch (err) {
+        logger.error(`[rebalance] tweet failed: ${err}`)
+      }
     }
   }
 }
