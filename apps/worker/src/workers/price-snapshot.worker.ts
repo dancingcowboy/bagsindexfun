@@ -118,7 +118,11 @@ export async function processSnapshot(_job?: Job) {
         isBlacklisted: false,
         rank: { gte: 1, lte: 10 },
         scoredAt: { gte: tailStart },
-        source: 'BAGS',
+        // Include BAGS (vault universe) and DEXSCREENER (admin chart
+        // universe). Without DEXSCREENER, the /admin/dex chart has no
+        // hourly data for its top-10 unless a vault happens to hold
+        // those tokens.
+        source: { in: ['BAGS', 'DEXSCREENER'] },
       },
       select: { tokenMint: true },
     })
