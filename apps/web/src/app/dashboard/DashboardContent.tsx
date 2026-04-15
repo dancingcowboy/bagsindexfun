@@ -44,6 +44,7 @@ const TIER_COLORS: Record<string, { bg: string; border: string; text: string; ch
   },
 }
 const TIER_LIST = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
+import { BAGSX_MINT } from '@bags-index/shared'
 import { api } from '@/lib/api'
 import { LogoFull } from '@/components/Logo'
 import { useCallback } from 'react'
@@ -214,6 +215,30 @@ export default function DashboardPage() {
       alert(e?.message || 'Failed to update auto-TP')
     } finally {
       setTpPending(null)
+    }
+  }
+
+  const [liquidatingMint, setLiquidatingMint] = useState<string | null>(null)
+  const handleLiquidateHolding = async (
+    mint: string,
+    tier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+    symbol: string | null,
+    valueSol: number,
+  ) => {
+    if (
+      !confirm(
+        `Liquidate your ${symbol ?? 'position'} in ${tier}?\n\nThis sells only this one position (~${valueSol.toFixed(4)} SOL) and sends the proceeds to your connected wallet. The rest of the vault is untouched.`,
+      )
+    )
+      return
+    setLiquidatingMint(`${tier}:${mint}`)
+    try {
+      const res = await api.liquidateHolding(mint, tier)
+      setLiquidation({ withdrawalId: res.data.id, tier })
+    } catch (e: any) {
+      alert(e?.message || 'Failed to liquidate position')
+    } finally {
+      setLiquidatingMint(null)
     }
   }
 
@@ -878,6 +903,24 @@ export default function DashboardPage() {
                                   dex
                                 </a>
                                 <CopyCAButton mint={h.tokenMint} />
+                                {h.tokenMint !== BAGSX_MINT && (
+                                  <button
+                                    type="button"
+                                    disabled={liquidatingMint === `${t.riskTier}:${h.tokenMint}`}
+                                    onClick={() =>
+                                      handleLiquidateHolding(
+                                        h.tokenMint,
+                                        t.riskTier,
+                                        h.tokenSymbol ?? null,
+                                        Number(h.valueSol),
+                                      )
+                                    }
+                                    title="Sell this position and withdraw SOL"
+                                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--color-text-muted)] hover:text-red-400 hover:border-red-400/50 transition-colors disabled:opacity-50"
+                                  >
+                                    {liquidatingMint === `${t.riskTier}:${h.tokenMint}` ? '…' : 'sell'}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -904,6 +947,7 @@ export default function DashboardPage() {
                             <th className="px-5 py-2 text-right font-medium">Amount</th>
                             <th className="px-5 py-2 text-right font-medium">Value (SOL)</th>
                             <th className="px-5 py-2 text-right font-medium">Allocation</th>
+                            <th className="px-5 py-2 text-right font-medium" />
                           </tr>
                         </thead>
                         <tbody>
@@ -961,6 +1005,26 @@ export default function DashboardPage() {
                                   </span>
                                 </div>
                               </td>
+                              <td className="px-5 py-3 text-right">
+                                {h.tokenMint !== BAGSX_MINT && (
+                                  <button
+                                    type="button"
+                                    disabled={liquidatingMint === `${t.riskTier}:${h.tokenMint}`}
+                                    onClick={() =>
+                                      handleLiquidateHolding(
+                                        h.tokenMint,
+                                        t.riskTier,
+                                        h.tokenSymbol ?? null,
+                                        Number(h.valueSol),
+                                      )
+                                    }
+                                    title="Sell this position and withdraw SOL to your wallet"
+                                    className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-muted)] hover:text-red-400 hover:border-red-400/50 transition-colors disabled:opacity-50"
+                                  >
+                                    {liquidatingMint === `${t.riskTier}:${h.tokenMint}` ? '…' : 'Sell'}
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                           {nativeSol > 0.001 && (
@@ -980,6 +1044,7 @@ export default function DashboardPage() {
                               <td className="px-5 py-3 text-right font-[family-name:var(--font-mono)] text-sm text-[var(--color-text-muted)]">
                                 {nativeSol.toFixed(4)}
                               </td>
+                              <td className="px-5 py-3" />
                               <td className="px-5 py-3" />
                             </tr>
                           )}

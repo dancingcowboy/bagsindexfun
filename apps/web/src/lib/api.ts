@@ -116,6 +116,24 @@ class ApiClient {
     )
   }
 
+  liquidateHolding(
+    mint: string,
+    riskTier: 'CONSERVATIVE' | 'BALANCED' | 'DEGEN',
+  ) {
+    return this.fetch<{
+      data: {
+        id: string
+        tokenMint: string
+        riskTier: string
+        estimatedSol: string
+        status: string
+      }
+    }>(`/portfolio/holdings/${mint}/liquidate`, {
+      method: 'POST',
+      body: JSON.stringify({ riskTier }),
+    })
+  }
+
   // Deposits
   createDeposit(
     amountSol: number,

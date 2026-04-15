@@ -22,6 +22,8 @@ interface WithdrawalJobData {
   subWalletId: string
   /** 1–100 — percentage of each holding to sell. Defaults to 100 (full). */
   pct?: number
+  /** Single-token liquidation — sell only this mint, leave other holdings untouched. */
+  tokenMint?: string
 }
 
 /**
@@ -29,10 +31,14 @@ interface WithdrawalJobData {
  * Sells holdings (all or a percentage) back to SOL, transfers to user wallet.
  */
 async function processWithdrawal(job: Job<WithdrawalJobData>) {
-  const { withdrawalId, userId, subWalletId, pct = 100 } = job.data
-  const isPartial = pct < 100
+  const { withdrawalId, userId, subWalletId, pct = 100, tokenMint } = job.data
+  // Single-token liquidation behaves like a partial withdrawal: transfer only
+  // the recovered SOL (not a full wallet sweep), keep the other holdings.
+  const isPartial = pct < 100 || !!tokenMint
   const logger = { info: console.log, error: console.error }
-  logger.info(`[withdrawal] Liquidating ${pct}% for withdrawal ${withdrawalId}`)
+  logger.info(
+    `[withdrawal] ${tokenMint ? `liquidating ${tokenMint.slice(0, 8)}… ` : `liquidating ${pct}% `}for withdrawal ${withdrawalId}`,
+  )
 
   const withdrawal = await db.withdrawal.findFirst({
     where: { id: withdrawalId, userId },
@@ -71,7 +77,13 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   let transferredLamports = 0n
 
   // Sell each holding sequentially (full or pct%)
-  for (const holding of subWallet.holdings) {
+  const holdingsToSell = tokenMint
+    ? subWallet.holdings.filter((h) => h.tokenMint === tokenMint)
+    : subWallet.holdings
+  if (tokenMint && holdingsToSell.length === 0) {
+    throw new Error(`Token ${tokenMint} not held in sub-wallet ${subWalletId}`)
+  }
+  for (const holding of holdingsToSell) {
     if (holding.amount <= 0n) continue
     if (alreadySoldMints.has(holding.tokenMint)) continue
     // Skip zero-value dust — there's no Jupiter/Bags route for tokens
@@ -152,8 +164,10 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
         },
       })
 
-      if (isPartial) {
-        // Trim the holding — keep the unsold portion
+      // Delete when the entire holding is gone (full withdrawal OR single-token
+      // liquidate, both of which sell 100% of this row). Otherwise trim.
+      const deleteFullHolding = !!tokenMint || !isPartial
+      if (!deleteFullHolding) {
         await db.holding.update({
           where: {
             subWalletId_tokenMint: {
@@ -170,7 +184,6 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
           },
         })
       } else {
-        // Full liquidation — delete the holding row
         await db.holding.delete({
           where: {
             subWalletId_tokenMint: {

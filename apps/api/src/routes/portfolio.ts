@@ -2,10 +2,11 @@ import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 import {
   RISK_TIERS,
+  BAGSX_MINT,
   createSwitchSchema,
 } from '@bags-index/shared'
 import { requireAuth } from '../middleware/auth.js'
-import { rebalanceQueue, switchQueue } from '../queue/queues.js'
+import { rebalanceQueue, switchQueue, withdrawalQueue } from '../queue/queues.js'
 
 export async function portfolioRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAuth)
@@ -415,6 +416,98 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return { success: true, data: { riskTier: tier, pct } }
       } catch (err) {
         app.log.error(err, 'Failed to update auto-TP')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
+   * POST /portfolio/holdings/:mint/liquidate
+   * Sell one specific holding back to SOL and transfer proceeds to the
+   * user's connected wallet. Leaves the other positions untouched. The
+   * resulting SOL is recorded as a USER withdrawal so cost-basis and
+   * PnL accounting stays consistent with full withdrawals.
+   *
+   * BAGSX is the fixed platform slice and is not individually liquidatable.
+   */
+  app.post<{ Params: { mint: string }; Body: { riskTier?: string } }>(
+    '/holdings/:mint/liquidate',
+    async (req, reply) => {
+      try {
+        const userId = req.authUser!.userId
+        const { mint } = req.params
+        const { riskTier } = req.body ?? {}
+        if (!mint || typeof mint !== 'string') {
+          return reply.status(400).send({ error: 'Invalid mint' })
+        }
+        if (mint === BAGSX_MINT) {
+          return reply.status(400).send({ error: 'BAGSX cannot be liquidated individually' })
+        }
+        if (!riskTier || !RISK_TIERS.includes(riskTier as any)) {
+          return reply.status(400).send({ error: 'Invalid tier' })
+        }
+        const tier = riskTier as 'CONSERVATIVE' | 'BALANCED' | 'DEGEN'
+
+        const user = await db.user.findUnique({ where: { id: userId } })
+        if (!user?.walletAddress) {
+          return reply.status(400).send({ error: 'Connect a wallet address first' })
+        }
+
+        const subWallet = await db.subWallet.findUnique({
+          where: { userId_riskTier: { userId, riskTier: tier } },
+          include: {
+            holdings: { where: { tokenMint: mint } },
+          },
+        })
+        if (!subWallet) {
+          return reply.status(404).send({ error: 'No vault for tier' })
+        }
+        const holding = subWallet.holdings[0]
+        if (!holding || holding.amount <= 0n) {
+          return reply.status(404).send({ error: 'Position not held' })
+        }
+
+        // Block concurrent PENDING withdrawals for this tier — prevents
+        // fighting with a full-withdrawal job over the same holdings.
+        const inflight = await db.withdrawal.findFirst({
+          where: { userId, riskTier: tier, status: 'PENDING' },
+        })
+        if (inflight) {
+          return reply.status(409).send({ error: 'Another withdrawal is already in progress for this tier' })
+        }
+
+        const estimatedSol = Number(holding.valueSolEst)
+        const withdrawal = await db.withdrawal.create({
+          data: {
+            userId,
+            riskTier: tier,
+            amountSol: estimatedSol.toFixed(9),
+            feeSol: '0',
+            status: 'PENDING',
+            source: 'USER',
+          },
+        })
+
+        await withdrawalQueue.add('liquidate', {
+          withdrawalId: withdrawal.id,
+          userId,
+          subWalletId: subWallet.id,
+          pct: 100,
+          tokenMint: mint,
+        })
+
+        return {
+          success: true,
+          data: {
+            id: withdrawal.id,
+            tokenMint: mint,
+            riskTier: tier,
+            estimatedSol: estimatedSol.toFixed(9),
+            status: withdrawal.status,
+          },
+        }
+      } catch (err) {
+        app.log.error(err, 'Failed to liquidate holding')
         return reply.status(500).send({ error: 'Internal server error' })
       }
     },
