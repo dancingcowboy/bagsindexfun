@@ -2,8 +2,11 @@ import type { FastifyInstance } from 'fastify'
 import crypto from 'node:crypto'
 import { db } from '@bags-index/db'
 import { requireAuth } from '../middleware/auth.js'
+import { redis } from '../queue/redis.js'
 
 const LINK_CODE_TTL_MS = 10 * 60 * 1000
+/** Per-user cap on link-code creation (hourly). */
+const LINK_CODE_MAX_PER_HOUR = 20
 
 /**
  * Telegram linking lives under the user's account — the dashboard lets each
@@ -21,6 +24,17 @@ export async function userRoutes(app: FastifyInstance) {
   app.post('/telegram/link-code', async (req, reply) => {
     try {
       const userId = req.authUser!.userId
+      // Handler-level throttle so the key is the authenticated user, not
+      // the request IP. INCR-with-EXPIRE is cheap and atomic enough for
+      // OTP brute-force prevention given the 6-digit × 10-min surface.
+      const key = `tg-link:${userId}`
+      const count = await redis.incr(key)
+      if (count === 1) await redis.expire(key, 3600)
+      if (count > LINK_CODE_MAX_PER_HOUR) {
+        return reply
+          .status(429)
+          .send({ success: false, error: 'Too many link attempts — try again in an hour.' })
+      }
       // crypto.randomInt is uniform; padStart covers leading-zero codes.
       const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0')
       const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS)

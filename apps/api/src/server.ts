@@ -129,20 +129,10 @@ await app.register(async (scoped) => {
 await app.register(depositRoutes, { prefix: '/deposits' })
 await app.register(withdrawalRoutes, { prefix: '/withdrawals' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
-
-// Authenticated user routes — link-code creation gets a per-user 5/hour
-// cap (on top of the global per-IP limit) to blunt OTP brute-force.
-await app.register(async (scoped) => {
-  await scoped.register(rateLimit, {
-    max: 5,
-    timeWindow: '1 hour',
-    redis,
-    keyGenerator: (req: any) =>
-      req.authUser?.userId ? `tg-link:${req.authUser.userId}` : req.ip,
-    allowList: (req: any) => req.method === 'GET' || !req.url.endsWith('/telegram/link-code'),
-  })
-  await scoped.register(userRoutes)
-}, { prefix: '/user' })
+// Per-user link-code throttling lives inside the route handler (after
+// auth) — rate-limit plugin here would key off IP because it runs before
+// requireAuth. Global per-IP rate limit still applies.
+await app.register(userRoutes, { prefix: '/user' })
 
 // Public routes
 await app.register(indexInfoRoutes, { prefix: '/index' })
