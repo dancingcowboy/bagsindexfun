@@ -103,7 +103,7 @@ export function TokenPriceChart({
 
   const aggQ = useQuery({
     queryKey: ['index-aggregate-history', activeTier, hours],
-    enabled: !!activeTier && !isAdminEndpoint,
+    enabled: !!activeTier,
     queryFn: async () => {
       const res = await fetch(
         `${API_BASE}/index/aggregate-history?tier=${activeTier}&hours=${hours}`,
