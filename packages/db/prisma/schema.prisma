@@ -15,11 +15,20 @@ model User {
   walletAddress String       @unique @map("wallet_address")
   createdAt     DateTime     @default(now()) @map("created_at")
   lastSeenAt    DateTime     @default(now()) @map("last_seen_at")
+  /// Telegram chat ID for bot DMs. Null = not linked. Stored as BigInt
+  /// because Telegram IDs can exceed 2^32.
+  telegramChatId            BigInt?   @map("telegram_chat_id")
+  /// Opt-in toggle. Default true once linked; users can disable without unlinking.
+  telegramNotifyEnabled     Boolean   @default(true) @map("telegram_notify_enabled")
+  /// Active one-time 6-digit code for linking the Telegram account. Cleared on link.
+  telegramLinkCode          String?   @map("telegram_link_code")
+  telegramLinkCodeExpiresAt DateTime? @map("telegram_link_code_expires_at")
   subWallets    SubWallet[]
   deposits      Deposit[]
   withdrawals   Withdrawal[]
   chatMessages  ChatMessage[]
 
+  @@index([telegramLinkCode])
   @@map("users")
 }
 

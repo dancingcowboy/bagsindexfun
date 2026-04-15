@@ -84,6 +84,209 @@ import { API_BASE } from '@/lib/api'
 const SOLANA_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL || `${API_BASE}/solana/rpc`
 
+/**
+ * Opt-in Telegram DM notifications. User clicks "Link Telegram" to
+ * generate a 6-digit code + deep link to @bagsindexbot. After they
+ * `/start` the bot, the webhook binds their chat id and this card polls
+ * `/user/telegram/status` every 3s until it flips to linked.
+ */
+function TelegramNotificationsCard() {
+  const [linked, setLinked] = useState<boolean | null>(null)
+  const [enabled, setEnabled] = useState<boolean>(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [code, setCode] = useState<string | null>(null)
+  const [deepLink, setDeepLink] = useState<string | null>(null)
+  const [codeExpires, setCodeExpires] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [now, setNow] = useState(Date.now())
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.getTelegramStatus()
+      setLinked(res.data.linked)
+      setEnabled(res.data.enabled)
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to load status')
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  // Poll every 3s while the linking modal is open, stopping as soon as
+  // Telegram confirms the bind (so the user sees instant feedback after
+  // they send /start CODE to the bot).
+  useEffect(() => {
+    if (!modalOpen || linked) return
+    const iv = setInterval(async () => {
+      try {
+        const res = await api.getTelegramStatus()
+        if (res.data.linked) {
+          setLinked(true)
+          setEnabled(res.data.enabled)
+          setModalOpen(false)
+        }
+      } catch {
+        /* ignore transient errors while polling */
+      }
+    }, 3000)
+    return () => clearInterval(iv)
+  }, [modalOpen, linked])
+
+  // Tick every second so the countdown re-renders.
+  useEffect(() => {
+    if (!modalOpen || !codeExpires) return
+    const iv = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [modalOpen, codeExpires])
+
+  async function startLink() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.createTelegramLinkCode()
+      setCode(res.data.code)
+      setDeepLink(res.data.deepLink)
+      setCodeExpires(new Date(res.data.expiresAt).getTime())
+      setModalOpen(true)
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to start link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleEnabled() {
+    setBusy(true)
+    try {
+      const res = await api.setTelegramEnabled(!enabled)
+      setEnabled(res.data.enabled)
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to update')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function unlink() {
+    if (!confirm('Unlink Telegram? You will stop receiving DMs.')) return
+    setBusy(true)
+    try {
+      await api.unlinkTelegram()
+      setLinked(false)
+      setEnabled(false)
+    } catch (err: any) {
+      setError(err?.message ?? 'Failed to unlink')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function copyCode() {
+    if (!code) return
+    navigator.clipboard.writeText(code)
+  }
+
+  const remaining = codeExpires ? Math.max(0, codeExpires - now) : 0
+  const mm = Math.floor(remaining / 60000)
+  const ss = Math.floor((remaining % 60000) / 1000).toString().padStart(2, '0')
+
+  return (
+    <div className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="text-sm font-semibold">Telegram notifications</div>
+        <div className="text-xs text-[var(--color-text-muted)]">
+          {linked
+            ? enabled
+              ? 'DMs from @bagsindexbot on every trade.'
+              : 'Linked — DMs currently paused.'
+            : 'Get DMs when your vaults trade, deposit, or withdraw.'}
+        </div>
+        {error && <div className="mt-1 text-xs text-red-400">{error}</div>}
+      </div>
+      <div className="flex items-center gap-2">
+        {linked ? (
+          <>
+            <button
+              onClick={toggleEnabled}
+              disabled={busy}
+              className="rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40"
+              style={{
+                borderColor: enabled ? '#00D62B' : 'var(--color-border)',
+                color: enabled ? '#00D62B' : 'var(--color-text-muted)',
+                backgroundColor: enabled ? 'rgba(0,214,43,0.08)' : 'transparent',
+              }}
+            >
+              {enabled ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={unlink}
+              disabled={busy}
+              className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-white disabled:opacity-40"
+            >
+              Unlink
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={startLink}
+            disabled={busy}
+            className="btn-outline text-xs disabled:opacity-40"
+          >
+            {busy ? 'Working…' : 'Link Telegram'}
+          </button>
+        )}
+      </div>
+
+      {modalOpen && code && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setModalOpen(false)}
+        >
+          <div
+            className="card w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold mb-1">Link Telegram</h3>
+            <p className="text-xs text-[var(--color-text-muted)] mb-4">
+              Open @bagsindexbot and send <code>/start {code}</code> — or just send the code.
+            </p>
+            <button
+              onClick={copyCode}
+              className="mb-3 w-full rounded-lg border border-[var(--color-border)] bg-black/30 py-4 font-[family-name:var(--font-mono)] text-3xl font-bold tracking-[0.4em] hover:bg-black/40"
+            >
+              {code}
+            </button>
+            {deepLink && (
+              <a
+                href={deepLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mb-3 block w-full rounded-md bg-[#00D62B] py-2 text-center text-sm font-bold text-black hover:opacity-90"
+              >
+                Open @{deepLink.split('/').pop()?.split('?')[0] || 'bagsindexbot'}
+              </a>
+            )}
+            <div className="mb-3 text-center text-xs text-[var(--color-text-muted)]">
+              Code expires in {mm}:{ss}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:text-white"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DashboardPage() {
   const { authenticated, ready, logout, user, connectWallet } = usePrivy()
   const { wallets: solanaWallets } = useConnectedStandardWallets()
@@ -473,6 +676,15 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.04 }}
+          className="mb-6"
+        >
+          <TelegramNotificationsCard />
         </motion.div>
 
         {/* Vault value + performance — side by side */}

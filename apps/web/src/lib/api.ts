@@ -264,6 +264,32 @@ class ApiClient {
     )
   }
 
+  // User — Telegram linking
+  getTelegramStatus() {
+    return this.fetch<{
+      data: { linked: boolean; enabled: boolean; pendingCodeExpiresAt: string | null }
+    }>('/user/telegram/status')
+  }
+
+  createTelegramLinkCode() {
+    return this.fetch<{
+      data: { code: string; expiresAt: string; deepLink: string; botUsername: string }
+    }>('/user/telegram/link-code', { method: 'POST', body: '{}' })
+  }
+
+  unlinkTelegram() {
+    return this.fetch<{ data: { linked: boolean; enabled: boolean } }>('/user/telegram', {
+      method: 'DELETE',
+    })
+  }
+
+  setTelegramEnabled(enabled: boolean) {
+    return this.fetch<{ data: { linked: boolean; enabled: boolean } }>(
+      '/user/telegram/enabled',
+      { method: 'PUT', body: JSON.stringify({ enabled }) },
+    )
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')

@@ -14,6 +14,7 @@ import {
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
 import { postToTelegram } from '../lib/telegram.js'
+import { notifyDeposit } from '../lib/notify-user.js'
 
 // Protocol-vault user's privy id — fee-claim auto-compounds run as this
 // user. Skip Telegram notices for them so we don't spam the reshuffle
@@ -376,6 +377,13 @@ async function processDeposit(job: Job<DepositJobData>) {
     }
   } catch (err) {
     logger.error(`[deposit] telegram notice failed: ${err}`)
+  }
+
+  // Opt-in DM to the depositing user.
+  try {
+    await notifyDeposit({ userId, depositId, riskTier: deposit.riskTier })
+  } catch (err) {
+    logger.error(`[deposit] user DM notify failed: ${err}`)
   }
 
   logger.info(`[deposit] Allocation complete for deposit ${depositId}`)

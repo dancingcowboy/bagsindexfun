@@ -118,6 +118,70 @@ export async function chatRoutes(app: FastifyInstance) {
     const message = body?.message
     if (!message) return { ok: true }
 
+    // Case 0: DM to the bot that matches a live opt-in link code.
+    // `/start CODE` (Telegram's standard deep-link handoff) or a bare
+    // 6-digit message binds this chat to the user who generated the code
+    // in the dashboard. Must run BEFORE the Case 1 forward-to-support
+    // block so link attempts don't spam the support group.
+    if (message.chat?.type === 'private' && TELEGRAM_BOT_TOKEN) {
+      const text = String(message.text ?? '').trim()
+      const codeMatch = text.match(/^(?:\/start\s+)?(\d{6})$/)
+      if (codeMatch) {
+        const code = codeMatch[1]
+        const chatId = BigInt(message.chat.id)
+        const dmSend = async (body: string) => {
+          await fetch(
+            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId.toString(),
+                text: body,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+              }),
+            },
+          ).catch((err) => app.log.error({ err }, '[chat/link] reply send failed'))
+        }
+        try {
+          const user = await db.user.findFirst({
+            where: {
+              telegramLinkCode: code,
+              telegramLinkCodeExpiresAt: { gt: new Date() },
+            },
+            select: { id: true, walletAddress: true },
+          })
+          if (user) {
+            await db.user.update({
+              where: { id: user.id },
+              data: {
+                telegramChatId: chatId,
+                telegramNotifyEnabled: true,
+                telegramLinkCode: null,
+                telegramLinkCodeExpiresAt: null,
+              },
+            })
+            const short = `${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}`
+            await dmSend(
+              `✅ Linked to wallet <code>${short}</code>\n\nYou'll now get DMs when your vaults trade. Manage in the dashboard.`,
+            )
+            return { ok: true }
+          }
+          // /start with a code that doesn't resolve — tell the user so
+          // they don't wait forever. Bare 6-digit with no match falls
+          // through to the support-forward path (could be a real msg).
+          if (text.startsWith('/start')) {
+            await dmSend('⚠️ That link code is invalid or expired. Generate a new one in the dashboard.')
+            return { ok: true }
+          }
+        } catch (err) {
+          app.log.error({ err }, '[chat/link] code-match branch failed')
+          // fall through to the normal forward path on any error
+        }
+      }
+    }
+
     // Case 1: DM to the bot — forward the raw message into the support
     // group and persist a mapping from the forwarded message's id in the
     // group to the DM chat id. The mapping is the authoritative route-

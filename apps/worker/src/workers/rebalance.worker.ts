@@ -23,6 +23,7 @@ import {
 import { redis } from '../queue/redis.js'
 import { postRebalanceAnnouncement } from '../lib/rebalance-tweet.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
+import { notifyRebalance } from '../lib/notify-user.js'
 
 interface RebalanceJobData {
   scoringCycleId?: string
@@ -584,6 +585,19 @@ async function processSingleWallet(
         `[rebalance/tp] payout step threw ${wallet.address.slice(0, 8)}: ${err?.message ?? err}`,
       )
     }
+  }
+
+  // Fire opt-in user DM before bumping the cycle counter. Reads
+  // CONFIRMED swaps for this wallet in this cycle; no-op when user hasn't
+  // linked Telegram or has notifications disabled.
+  if (success) {
+    await notifyRebalance({
+      userId: wallet.userId,
+      walletId: wallet.id,
+      riskTier: wallet.riskTier,
+      rebalanceCycleId: cycle.id,
+      trigger: cycle.trigger,
+    })
   }
 
   await bumpAndMaybeFinish(cycle.id, success, logger, cycle.scoringCycleId)

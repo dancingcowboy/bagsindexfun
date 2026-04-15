@@ -15,6 +15,7 @@ import { analysisRoutes } from './routes/analysis.js'
 import { solanaRpcRoutes } from './routes/solana-rpc.js'
 import { adminRoutes } from './routes/admin.js'
 import { chatRoutes } from './routes/chat.js'
+import { userRoutes } from './routes/user.js'
 import { db } from '@bags-index/db'
 import { redis } from './queue/redis.js'
 
@@ -128,6 +129,20 @@ await app.register(async (scoped) => {
 await app.register(depositRoutes, { prefix: '/deposits' })
 await app.register(withdrawalRoutes, { prefix: '/withdrawals' })
 await app.register(portfolioRoutes, { prefix: '/portfolio' })
+
+// Authenticated user routes — link-code creation gets a per-user 5/hour
+// cap (on top of the global per-IP limit) to blunt OTP brute-force.
+await app.register(async (scoped) => {
+  await scoped.register(rateLimit, {
+    max: 5,
+    timeWindow: '1 hour',
+    redis,
+    keyGenerator: (req: any) =>
+      req.authUser?.userId ? `tg-link:${req.authUser.userId}` : req.ip,
+    allowList: (req: any) => req.method === 'GET' || !req.url.endsWith('/telegram/link-code'),
+  })
+  await scoped.register(userRoutes)
+}, { prefix: '/user' })
 
 // Public routes
 await app.register(indexInfoRoutes, { prefix: '/index' })

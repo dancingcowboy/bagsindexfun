@@ -15,6 +15,7 @@ import {
 } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 import { reconcileSubWalletHoldings } from '../lib/reconcile.js'
+import { notifyWithdrawal } from '../lib/notify-user.js'
 
 interface WithdrawalJobData {
   withdrawalId: string
@@ -280,6 +281,17 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   logger.info(
     `[withdrawal] Liquidation ${status} for ${withdrawalId}: recovered ${totalRecoveredLamports} lamports, ${failedTokens} failures`
   )
+
+  // Opt-in DM to the withdrawing user (post-reconcile so summary is fresh).
+  try {
+    await notifyWithdrawal({
+      userId,
+      withdrawalId,
+      riskTier: withdrawal.riskTier,
+    })
+  } catch (err) {
+    logger.error(`[withdrawal] user DM notify failed: ${err}`)
+  }
 }
 
 export function createWithdrawalWorker() {
