@@ -131,10 +131,7 @@ export async function sendJitoProtected(signedTxBase64: string): Promise<string>
 
 /**
  * Fetch the on-chain quote-token liquidity (in SOL) for a token's primary
- * Bags/Meteora pool. Used to enforce the per-trade liquidity cap.
- *
- * Strategy: hit Jupiter's price+liquidity endpoint as a proxy for the deepest
- * pool. Returns SOL liquidity available on the buy side.
+ * Bags/Meteora pool via Jupiter's price+liquidity endpoint.
  */
 export async function getTokenSolLiquidity(tokenMint: string): Promise<number> {
   try {

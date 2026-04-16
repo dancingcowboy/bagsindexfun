@@ -9,8 +9,8 @@ import bs58 from 'bs58'
 import { getConnection } from './connection.js'
 import { getTradeQuote, getSwapTransaction } from './bags.js'
 import { getJupiterQuote, buildJupiterSwapTx } from './jupiter-swap.js'
-import { sendJitoProtected, getTokenSolLiquidity } from './helius.js'
-import { SOL_MINT, DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS, MAX_LIQUIDITY_PCT, LAMPORTS_PER_SOL } from '@bags-index/shared'
+import { sendJitoProtected } from './helius.js'
+import { SOL_MINT, DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS } from '@bags-index/shared'
 
 export interface SwapResult {
   signature: string
@@ -305,16 +305,13 @@ export async function submitAndConfirmDirect(signedTxBytes: Uint8Array): Promise
 }
 
 /**
- * Cap a desired SOL input to no more than MAX_LIQUIDITY_PCT (default 2%) of the
- * token's available SOL-side liquidity. Returns the capped lamport amount.
- *
- * If liquidity can't be fetched, falls back to the requested amount (the swap's
- * own slippage cap will still protect against catastrophic moves).
+ * Previously capped swap size to a % of pool liquidity to limit slippage.
+ * The per-swap slippage guard (MAX_SLIPPAGE_BPS) already protects against
+ * catastrophic executions, so the hard ceiling was removed — callers get the
+ * full requested amount back. Kept as a thin passthrough so existing call
+ * sites continue to compile and we can reinstate a cap without a signature
+ * change if needed.
  */
-export async function capInputToLiquidity(tokenMint: string, requestedLamports: bigint): Promise<bigint> {
-  const solLiquidity = await getTokenSolLiquidity(tokenMint)
-  if (!solLiquidity || solLiquidity <= 0) return requestedLamports
-  const maxSol = solLiquidity * (MAX_LIQUIDITY_PCT / 100)
-  const maxLamports = BigInt(Math.floor(maxSol * LAMPORTS_PER_SOL))
-  return requestedLamports > maxLamports ? maxLamports : requestedLamports
+export async function capInputToLiquidity(_tokenMint: string, requestedLamports: bigint): Promise<bigint> {
+  return requestedLamports
 }

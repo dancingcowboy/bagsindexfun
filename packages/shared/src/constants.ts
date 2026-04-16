@@ -152,9 +152,6 @@ export const DEFAULT_SLIPPAGE_BPS = 300
 /** Max slippage cap (5%) */
 export const MAX_SLIPPAGE_BPS = 500
 
-/** Max % of a token's available SOL liquidity any single trade may consume. */
-export const MAX_LIQUIDITY_PCT = 2
-
 /** Max retries for failed swaps */
 export const MAX_SWAP_RETRIES = 3
 

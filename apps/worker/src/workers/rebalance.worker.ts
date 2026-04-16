@@ -461,10 +461,9 @@ async function processSingleWallet(
     }
 
     // Buys — no deadband on positive diffs. When the desired amount
-    // exceeds what the rule (liquidity cap) or available native SOL
-    // permits, buy the max the rule allows instead of skipping
-    // entirely. Small drifts still close toward target each cycle;
-    // large drifts partial-fill and finish over the next few cycles.
+    // exceeds available native SOL, buy as much as we have instead of
+    // skipping entirely. Small drifts still close toward target each
+    // cycle; large drifts partial-fill and finish over the next few.
     for (const [tokenMint, targetWeight] of targetWeights) {
       const currentWeight = currentAllocations.get(tokenMint) ?? 0
       const diff = targetWeight - currentWeight

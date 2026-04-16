@@ -249,7 +249,6 @@ async function processDeposit(job: Job<DepositJobData>) {
     const pending = pendingSwaps.find((p) => p.mint === score.tokenMint)
     if (!pending) continue
 
-    // Cap to ≤2% of token's available SOL liquidity to limit slippage impact
     const lamports = await capInputToLiquidity(score.tokenMint, pending.lamports)
     const solForToken = Number(lamports) / LAMPORTS_PER_SOL
 

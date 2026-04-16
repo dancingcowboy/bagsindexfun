@@ -282,7 +282,7 @@ export default function DashboardPage() {
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [showWithdraw, setShowWithdraw] = useState(false)
   // Default to live mode so totalValueSol includes the sub-wallet's native
-  // SOL balance (unspent after liquidity-cap clamps) and uses current prices
+  // SOL balance (unspent native SOL) and uses current prices
   // instead of stale valueSolEst from DB.
   const [portfolioLive, setPortfolioLive] = useState(true)
   const [notice, setNotice] = useState<NoticeState | null>(null)
