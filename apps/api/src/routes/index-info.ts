@@ -3,6 +3,7 @@ import { db } from '@bags-index/db'
 import {
   BAGSX_MINT,
   BAGSX_WEIGHT_PCT,
+  SOL_MINT,
   TIER_SCORING_CONFIG,
 } from '@bags-index/shared'
 
@@ -325,7 +326,34 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           arr.push({ t: s.createdAt.getTime(), price: Number(s.priceSol) })
           seriesByMint.set(s.tokenMint, arr)
         }
+
+        // 3b. Actual-vault honesty gate: a mint's returns only count from
+        //     the moment the tier's vaults actually bought it. Before the
+        //     first SUCCESS SOL→mint swap for the tier, the replay treats
+        //     the mint as unheld (weight redistributed implicitly among
+        //     tradeable tokens via the wSum divisor below).
+        // All-time lookup — a token bought before the price window should
+        // still count from the window start, not be excluded entirely.
+        const firstBuyRows = await db.swapExecution.findMany({
+          where: {
+            status: 'CONFIRMED',
+            inputMint: SOL_MINT,
+            outputMint: { in: [...allMints] },
+            subWallet: { riskTier: tier },
+          },
+          orderBy: { executedAt: 'asc' },
+          select: { outputMint: true, executedAt: true },
+        })
+        const firstBuyAt = new Map<string, number>()
+        for (const r of firstBuyRows) {
+          if (!firstBuyAt.has(r.outputMint)) {
+            firstBuyAt.set(r.outputMint, r.executedAt.getTime())
+          }
+        }
+
         const priceAt = (mint: string, t: number): number | null => {
+          const firstBuy = firstBuyAt.get(mint)
+          if (firstBuy == null || t < firstBuy) return null
           const arr = seriesByMint.get(mint)
           if (!arr || arr.length === 0) return null
           let lo = 0
