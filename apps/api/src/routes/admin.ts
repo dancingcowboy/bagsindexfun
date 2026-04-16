@@ -362,7 +362,25 @@ export async function adminRoutes(app: FastifyInstance) {
         }
       }
 
-      // Resolve symbol/name per mint from the most recent TokenScore row.
+      // Fetch native SOL balance per sub-wallet so each tier card can
+      // surface its idle gas reserve the same way the user dashboard does.
+      // `live` already carries nativeSol for the first wallet; for others
+      // (or when live is off) do a cheap per-wallet RPC read in parallel.
+      const { getNativeSolBalance } = await import('@bags-index/solana')
+      const nativeSolByAddress = new Map<string, number>()
+      if (live) nativeSolByAddress.set(user.subWallets[0]?.address ?? '', live.nativeSol)
+      await Promise.all(
+        user.subWallets.map(async (w) => {
+          if (nativeSolByAddress.has(w.address)) return
+          try {
+            nativeSolByAddress.set(w.address, await getNativeSolBalance(w.address))
+          } catch {
+            nativeSolByAddress.set(w.address, 0)
+          }
+        }),
+      )
+
+      // Resolve symbol/name/MC per mint from the most recent TokenScore row.
       // Include both DB holdings and (if available) live on-chain mints.
       const mints = new Set<string>()
       for (const w of user.subWallets) for (const h of w.holdings) mints.add(h.tokenMint)
@@ -371,12 +389,26 @@ export async function adminRoutes(app: FastifyInstance) {
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
             orderBy: { scoredAt: 'desc' },
-            select: { tokenMint: true, tokenSymbol: true, tokenName: true },
+            select: {
+              tokenMint: true,
+              tokenSymbol: true,
+              tokenName: true,
+              marketCapUsd: true,
+            },
           })
         : []
-      const metaByMint = new Map<string, { symbol: string; name: string }>()
+      const metaByMint = new Map<
+        string,
+        { symbol: string; name: string; marketCapUsd: number }
+      >()
       for (const s of scores) {
-        if (!metaByMint.has(s.tokenMint)) metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName })
+        if (!metaByMint.has(s.tokenMint)) {
+          metaByMint.set(s.tokenMint, {
+            symbol: s.tokenSymbol,
+            name: s.tokenName,
+            marketCapUsd: Number(s.marketCapUsd ?? 0),
+          })
+        }
       }
 
       const tokenValueSol = user.subWallets.reduce(
@@ -396,36 +428,55 @@ export async function adminRoutes(app: FastifyInstance) {
         success: true,
         data: {
           walletAddress: user.walletAddress,
-          subWallets: user.subWallets.map((w, idx) => ({
-            riskTier: w.riskTier,
-            address: w.address,
+          subWallets: user.subWallets.map((w, idx) => {
             // First sub-wallet uses live on-chain holdings (the vault
             // currently has a single sub-wallet). Any additional wallets
             // fall back to DB rows.
-            holdings:
+            const liveRows =
               idx === 0 && live
-                ? live.holdings.map((h) => {
-                    const meta = metaByMint.get(h.tokenMint)
-                    return {
-                      tokenMint: h.tokenMint,
-                      tokenSymbol: meta?.symbol ?? null,
-                      tokenName: meta?.name ?? null,
-                      amount: h.amount,
-                      valueSolEst: h.valueSol.toFixed(6),
-                      priceSource: h.source,
-                    }
-                  })
-                : w.holdings.map((h) => {
-                    const meta = metaByMint.get(h.tokenMint)
-                    return {
-                      tokenMint: h.tokenMint,
-                      tokenSymbol: meta?.symbol ?? null,
-                      tokenName: meta?.name ?? null,
-                      amount: h.amount.toString(),
-                      valueSolEst: h.valueSolEst?.toString() ?? '0',
-                    }
-                  }),
-          })),
+                ? live.holdings.map((h) => ({
+                    tokenMint: h.tokenMint,
+                    amount: h.amount,
+                    valueSol: h.valueSol,
+                    priceSource: h.source as string | undefined,
+                  }))
+                : w.holdings.map((h) => ({
+                    tokenMint: h.tokenMint,
+                    amount: h.amount.toString(),
+                    valueSol: Number(h.valueSolEst ?? 0),
+                    priceSource: undefined as string | undefined,
+                  }))
+            const tierTokenValueSol = liveRows.reduce((s, h) => s + h.valueSol, 0)
+            const wNativeSol =
+              liveRows.length > 0 ? nativeSolByAddress.get(w.address) ?? 0 : 0
+            const totalValueSol = tierTokenValueSol + wNativeSol
+            return {
+              riskTier: w.riskTier,
+              address: w.address,
+              walletAddress: w.address, // dashboard-parity alias
+              totalValueSol: totalValueSol.toFixed(9),
+              nativeSol: wNativeSol.toFixed(9),
+              holdings: liveRows.map((h) => {
+                const meta = metaByMint.get(h.tokenMint)
+                return {
+                  tokenMint: h.tokenMint,
+                  tokenSymbol: meta?.symbol ?? null,
+                  tokenName: meta?.name ?? null,
+                  amount: h.amount,
+                  // Dashboard-shape fields (valueSol + allocationPct + MC).
+                  valueSol: h.valueSol.toFixed(9),
+                  // Keep legacy field name for existing admin consumers.
+                  valueSolEst: h.valueSol.toFixed(9),
+                  marketCapUsd: meta?.marketCapUsd ?? 0,
+                  allocationPct:
+                    tierTokenValueSol > 0
+                      ? ((h.valueSol / tierTokenValueSol) * 100).toFixed(2)
+                      : '0',
+                  priceSource: h.priceSource,
+                }
+              }),
+            }
+          }),
           totals: {
             totalValueSol: totalValueSol.toFixed(6),
             tokenValueSol: tokenValueSol.toFixed(6),

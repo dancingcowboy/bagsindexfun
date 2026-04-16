@@ -10,6 +10,7 @@ import { LogoFull } from '@/components/Logo'
 import { PnlHistoryChart } from '@/components/PnlHistoryChart'
 import { TokenPriceChart } from '@/components/TokenPriceChart'
 import { VaultTwrChart } from '@/components/VaultTwrChart'
+import { TierHoldingsCard } from '@/components/TierHoldingsCard'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -858,39 +859,44 @@ export default function AdminPage() {
                   </div>
                 </Panel>
 
-                <Panel title="Sub-Wallets & Holdings">
-                  <div className="divide-y divide-[var(--color-border-subtle)]">
-                    {vault.data.data.subWallets.map((w) => (
-                      <div key={w.address} className="p-4">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="rounded border border-[var(--color-border)] px-2 py-0.5 text-[10px] font-bold uppercase">{w.riskTier}</span>
-                          <span className="font-mono text-[10px] text-[var(--color-text-muted)]">{w.address}</span>
-                        </div>
-                        {w.holdings.length === 0 ? (
-                          <div className="text-xs text-[var(--color-text-muted)]">No holdings</div>
-                        ) : (
-                          <table className="w-full text-xs">
-                            <thead className="text-left text-[var(--color-text-muted)]">
-                              <tr><th className="py-1">Token</th><th className="py-1 text-right">Amount</th><th className="py-1 text-right">Value (SOL)</th></tr>
-                            </thead>
-                            <tbody>
-                              {w.holdings.map((h) => (
-                                <tr key={h.tokenMint} className="border-t border-[var(--color-border-subtle)]">
-                                  <td className="py-1">
-                                    <div className="font-semibold">{h.tokenSymbol ?? '—'}</div>
-                                    <div className="font-mono text-[10px] text-[var(--color-text-muted)]">{h.tokenMint.slice(0, 6)}…{h.tokenMint.slice(-4)}</div>
-                                  </td>
-                                  <td className="py-1 text-right">{h.amount}</td>
-                                  <td className="py-1 text-right">{Number(h.valueSolEst).toFixed(4)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    ))}
+                {/* Sub-Wallets & Holdings — dashboard-parity tier cards. */}
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="font-[family-name:var(--font-display)] text-xl font-bold">
+                    Holdings
+                  </h2>
+                </div>
+                {vault.data.data.subWallets.length === 0 ||
+                vault.data.data.subWallets.every(
+                  (w: any) => (w.holdings ?? []).length === 0,
+                ) ? (
+                  <div className="card p-12 text-center text-[var(--color-text-muted)]">
+                    No holdings yet — next fee claim will populate the vault.
                   </div>
-                </Panel>
+                ) : (
+                  <div className="space-y-4">
+                    {vault.data.data.subWallets
+                      .filter((w: any) => (w.holdings ?? []).length > 0)
+                      .map((w: any) => (
+                        <TierHoldingsCard
+                          key={w.address}
+                          tier={{
+                            riskTier: w.riskTier,
+                            walletAddress: w.walletAddress ?? w.address,
+                            totalValueSol: w.totalValueSol ?? 0,
+                            nativeSol: w.nativeSol ?? 0,
+                            holdings: (w.holdings ?? []).map((h: any) => ({
+                              tokenMint: h.tokenMint,
+                              tokenSymbol: h.tokenSymbol,
+                              amount: h.amount,
+                              valueSol: h.valueSol ?? h.valueSolEst ?? 0,
+                              allocationPct: h.allocationPct ?? '0',
+                              marketCapUsd: h.marketCapUsd ?? 0,
+                            })),
+                          }}
+                        />
+                      ))}
+                  </div>
+                )}
 
                 <Panel title="Recent Claims">
                   <table className="w-full text-sm">
