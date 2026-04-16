@@ -110,7 +110,7 @@ export function TokenPriceChart({
       )
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {
-        data: { tier: string; points: { t: string; indexed: number }[] }
+        data: { tier: string; points: { t: string; indexed: number; rebalance?: boolean }[] }
       }
     },
     refetchInterval: 5 * 60_000,
@@ -136,6 +136,7 @@ export function TokenPriceChart({
       const ts = new Date(p.t).toISOString()
       const row = map.get(ts) ?? { t: ts }
       row.__INDEX__ = p.indexed
+      if (p.rebalance) row.__REBALANCE__ = 1
       map.set(ts, row)
     }
     return [...map.values()].sort(
@@ -263,7 +264,29 @@ export function TokenPriceChart({
                   stroke="#ffffff"
                   strokeWidth={hovered === '__INDEX__' ? 4 : 3}
                   strokeOpacity={hovered && hovered !== '__INDEX__' ? 0.35 : 1}
-                  dot={false}
+                  dot={(props: unknown) => {
+                    const p = props as {
+                      cx?: number
+                      cy?: number
+                      payload?: { __REBALANCE__?: number }
+                      index?: number
+                    }
+                    if (!p.payload?.__REBALANCE__ || p.cx == null || p.cy == null) {
+                      return <g key={`d-${p.index}`} />
+                    }
+                    return (
+                      <circle
+                        key={`d-${p.index}`}
+                        cx={p.cx}
+                        cy={p.cy}
+                        r={3.5}
+                        fill="#000"
+                        stroke="#ffffff"
+                        strokeWidth={1.5}
+                      />
+                    )
+                  }}
+                  activeDot={{ r: 5, fill: '#ffffff', stroke: '#000', strokeWidth: 1 }}
                   connectNulls
                   onMouseEnter={() => setHovered('__INDEX__')}
                   onMouseLeave={() => setHovered(null)}

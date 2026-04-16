@@ -376,7 +376,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         // 6. Walk buckets. Within a cycle: chain weighted return using its
         //    basket. Across cycles: switch basket, no return booked on the
         //    transition step (rebalance treated as instantaneous / free).
-        const points: { t: string; indexed: number }[] = []
+        const points: { t: string; indexed: number; rebalance?: boolean }[] = []
         let index = 100
         let prevTime = -1
         let prevCycleId: string | null = null
@@ -400,9 +400,10 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           }
 
           // Cycle switched between prev and now — book no return on the
-          // rebalance step itself; basket changes going forward.
+          // rebalance step itself; basket changes going forward. Mark the
+          // bucket so the chart can show a dot at the rebalance.
           if (cycleId !== prevCycleId) {
-            points.push({ t: new Date(t).toISOString(), indexed: index })
+            points.push({ t: new Date(t).toISOString(), indexed: index, rebalance: true })
             prevTime = t
             prevCycleId = cycleId
             continue
