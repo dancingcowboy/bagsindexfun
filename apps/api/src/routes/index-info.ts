@@ -212,13 +212,14 @@ export async function indexInfoRoutes(app: FastifyInstance) {
   /**
    * GET /index/aggregate-history?tier=BALANCED&hours=168
    *
-   * Aggregated index line for a tier: weighted average of constituent
-   * token prices, chained across scoring cycles so that rebalances don't
-   * distort the series. For each hour bucket:
-   *   - find the scoring cycle active at that time
-   *   - take its top-10 normalized weights (compositeScore) for the tier
-   *   - weighted return since the previous bucket, chained onto the index
-   * Index is normalized to 100 at the first bucket in range.
+   * Honest-replay index line for a tier: walks each historical scoring
+   * cycle in sequence and uses THAT cycle's actual top-10 basket for its
+   * window. No survivorship bias — tokens that entered later don't get
+   * credit for gains that happened before they were picked. Across cycle
+   * boundaries the basket switches and no return is booked on the step
+   * itself (models an instant, frictionless rebalance — a slippage-drag
+   * model can be layered on later). Index is normalized to 100 at the
+   * first emitted bucket in range.
    */
   app.get<{ Querystring: { tier?: string; hours?: string } }>(
     '/aggregate-history',
@@ -234,66 +235,80 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         const hours = Math.min(Math.max(parseInt(req.query.hours ?? '168', 10), 1), 24 * 90)
         const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
-        // 1. Use the LATEST completed cycle's top-10 as a constant basket
-        //    for the whole window. Earlier approach used the cycle active
-        //    at each bucket time, but that means tokens added in today's
-        //    cycle (e.g. PRIMIS in CONSERVATIVE) get weight 0 for older
-        //    buckets and their later spikes never enter the index. The
-        //    intuitive view is "how would today's top 10 have performed
-        //    over the past N hours" — same convention as the per-token
-        //    chart below.
-        // Scope to the latest completed cycle *for this tier*. Per-tier
-        // scoring writes tier-scoped cycles, so a global latest-cycle
-        // lookup only returns whichever tier ran last. Fall back to any
-        // legacy tier-less cycle if no tier-scoped one exists yet.
-        let latestCycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED', source: 'BAGS', completedAt: { not: null }, tier },
-          orderBy: { completedAt: 'desc' },
-          select: { id: true },
-        })
-        if (!latestCycle) {
-          latestCycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', source: 'BAGS', completedAt: { not: null }, tier: null },
+        // 1. Load every completed cycle for this tier whose window
+        //    overlaps the range. We need the one that was ACTIVE at
+        //    `since` (i.e. the latest cycle completed before the range
+        //    start) plus all cycles that completed within the range.
+        const [activeAtStart, withinRange] = await Promise.all([
+          db.scoringCycle.findFirst({
+            where: {
+              status: 'COMPLETED',
+              source: 'BAGS',
+              tier,
+              completedAt: { not: null, lte: since },
+            },
             orderBy: { completedAt: 'desc' },
-            select: { id: true },
-          })
-        }
-        if (!latestCycle) {
+            select: { id: true, completedAt: true },
+          }),
+          db.scoringCycle.findMany({
+            where: {
+              status: 'COMPLETED',
+              source: 'BAGS',
+              tier,
+              completedAt: { gt: since },
+            },
+            orderBy: { completedAt: 'asc' },
+            select: { id: true, completedAt: true },
+          }),
+        ])
+        const cycles = [
+          ...(activeAtStart ? [activeAtStart] : []),
+          ...withinRange,
+        ]
+        if (cycles.length === 0) {
           return { success: true, data: { tier, points: [] } }
         }
-        const scores = await db.tokenScore.findMany({
+
+        // 2. Load the top-10 basket for each cycle in a single query,
+        //    then group by cycleId → weights (normalized by compositeScore
+        //    with BAGSX fixed at BAGSX_WEIGHT_PCT and SOL anchor treated
+        //    as cash at 0 return).
+        const anchorPct = TIER_SCORING_CONFIG[tier]?.solAnchorPct ?? 0
+        const scoredScale = (100 - BAGSX_WEIGHT_PCT - anchorPct) / 100
+        const allScores = await db.tokenScore.findMany({
           where: {
-            cycleId: latestCycle.id,
+            cycleId: { in: cycles.map((c) => c.id) },
             riskTier: tier,
             isBlacklisted: false,
             rank: { gte: 1, lte: 10 },
           },
-          select: { tokenMint: true, compositeScore: true },
+          select: { cycleId: true, tokenMint: true, compositeScore: true },
         })
-        const weights = new Map<string, number>()
-        const totalScore = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
-        const anchorPct = TIER_SCORING_CONFIG[tier]?.solAnchorPct ?? 0
-        const scoredScale = (100 - BAGSX_WEIGHT_PCT - anchorPct) / 100
-        for (const s of scores) {
-          weights.set(
-            s.tokenMint,
-            (Number(s.compositeScore) / totalScore) * scoredScale,
-          )
+        const basketByCycle = new Map<string, Map<string, number>>()
+        const allMints = new Set<string>([BAGSX_MINT])
+        for (const c of cycles) {
+          const scores = allScores.filter((s) => s.cycleId === c.id)
+          const basket = new Map<string, number>()
+          const total = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
+          for (const s of scores) {
+            basket.set(
+              s.tokenMint,
+              (Number(s.compositeScore) / total) * scoredScale,
+            )
+            allMints.add(s.tokenMint)
+          }
+          basket.set(BAGSX_MINT, BAGSX_WEIGHT_PCT / 100)
+          basketByCycle.set(c.id, basket)
         }
-        // Inject BAGSX as a fixed 10% basket component. SOL anchor is
-        // treated as cash — it doesn't move against SOL so it contributes
-        // 0 return; we simply don't add it to `weights`.
-        weights.set(BAGSX_MINT, BAGSX_WEIGHT_PCT / 100)
 
-        // 2. Load price snapshots for the basket mints over the window.
-        const allMints = new Set<string>(weights.keys())
-        if (allMints.size === 0) {
-          return { success: true, data: { tier, points: [] } }
-        }
+        // 3. Load price snapshots for every mint that ever appeared in any
+        //    basket in range. Pad `since` back by a few hours so the first
+        //    bucket in range has a forward-fillable price.
+        const priceSince = new Date(since.getTime() - 24 * HOUR_MS)
         const samples = await db.tokenPriceSnapshot.findMany({
           where: {
             tokenMint: { in: [...allMints] },
-            createdAt: { gte: since },
+            createdAt: { gte: priceSince },
           },
           orderBy: { createdAt: 'asc' },
           select: { tokenMint: true, priceSol: true, createdAt: true },
@@ -301,27 +316,15 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         if (samples.length === 0) {
           return { success: true, data: { tier, points: [] } }
         }
-
-        // 4. Build per-mint sorted price series for forward-filling. Each
-        //    mint typically only has one sample per hour, and not every
-        //    mint samples on the same hour boundary, so the previous
-        //    "tokens in BOTH adjacent buckets" approach gave near-empty
-        //    overlap and a flat index line. Instead, for each hour bucket
-        //    we look up each weighted token's last-known price (≤ bucket
-        //    time). Tokens with no observation yet are skipped for that
-        //    bucket only.
         const seriesByMint = new Map<string, { t: number; price: number }[]>()
         for (const s of samples) {
           const arr = seriesByMint.get(s.tokenMint) ?? []
           arr.push({ t: s.createdAt.getTime(), price: Number(s.priceSol) })
           seriesByMint.set(s.tokenMint, arr)
         }
-        // samples are already orderBy createdAt asc, so per-mint arrays are sorted
-
         const priceAt = (mint: string, t: number): number | null => {
           const arr = seriesByMint.get(mint)
           if (!arr || arr.length === 0) return null
-          // Binary search for the largest entry with t <= target
           let lo = 0
           let hi = arr.length - 1
           let chosen = -1
@@ -338,43 +341,77 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           return arr[chosen].price
         }
 
-        // 5. Build an ordered list of hourly bucket timestamps spanning
-        //    the full range, regardless of whether any sample landed
-        //    exactly on that hour. Start at the first hour ≥ since.
+        // 4. Resolve which cycle is active at a given time (latest cycle
+        //    with completedAt <= t). Binary search keeps this fast.
+        const cycleTimes = cycles.map((c) => ({
+          t: c.completedAt!.getTime(),
+          id: c.id,
+        }))
+        const activeCycleAt = (t: number): string | null => {
+          let lo = 0
+          let hi = cycleTimes.length - 1
+          let chosen = -1
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1
+            if (cycleTimes[mid].t <= t) {
+              chosen = mid
+              lo = mid + 1
+            } else {
+              hi = mid - 1
+            }
+          }
+          return chosen < 0 ? null : cycleTimes[chosen].id
+        }
+
+        // 5. Hourly bucket timeline from `since` to now.
         const startBucket = new Date(since)
         startBucket.setMinutes(0, 0, 0)
-        // If the first bucket has no observation for any weighted token,
-        // step forward until one does.
-        const HOUR = 60 * 60 * 1000
         const nowFloor = new Date()
         nowFloor.setMinutes(0, 0, 0)
         const orderedTimes: number[] = []
-        for (let t = startBucket.getTime(); t <= nowFloor.getTime(); t += HOUR) {
+        for (let t = startBucket.getTime(); t <= nowFloor.getTime(); t += HOUR_MS) {
           orderedTimes.push(t)
         }
 
-        // 6. Chain weighted returns across consecutive buckets using the
-        //    constant latest-cycle basket and forward-filled per-mint prices.
+        // 6. Walk buckets. Within a cycle: chain weighted return using its
+        //    basket. Across cycles: switch basket, no return booked on the
+        //    transition step (rebalance treated as instantaneous / free).
         const points: { t: string; indexed: number }[] = []
         let index = 100
-        let started = false
         let prevTime = -1
+        let prevCycleId: string | null = null
         for (const t of orderedTimes) {
-          if (!started) {
+          const cycleId = activeCycleAt(t)
+          if (!cycleId) continue
+          const basket = basketByCycle.get(cycleId)
+          if (!basket) continue
+
+          // First emitted bucket — baseline at 100.
+          if (prevTime < 0) {
             let any = false
-            for (const mint of weights.keys()) {
+            for (const mint of basket.keys()) {
               if (priceAt(mint, t) !== null) { any = true; break }
             }
             if (!any) continue
-            started = true
-            prevTime = t
             points.push({ t: new Date(t).toISOString(), indexed: 100 })
+            prevTime = t
+            prevCycleId = cycleId
             continue
           }
 
+          // Cycle switched between prev and now — book no return on the
+          // rebalance step itself; basket changes going forward.
+          if (cycleId !== prevCycleId) {
+            points.push({ t: new Date(t).toISOString(), indexed: index })
+            prevTime = t
+            prevCycleId = cycleId
+            continue
+          }
+
+          // Same cycle — chain weighted return using current basket.
           let stepRet = 0
           let wSum = 0
-          for (const [mint, w] of weights) {
+          for (const [mint, w] of basket) {
             const p0 = priceAt(mint, prevTime)
             const p1 = priceAt(mint, t)
             if (p0 !== null && p1 !== null && p0 > 0) {
@@ -388,6 +425,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           }
           points.push({ t: new Date(t).toISOString(), indexed: index })
           prevTime = t
+          prevCycleId = cycleId
         }
 
         return { success: true, data: { tier, points } }
