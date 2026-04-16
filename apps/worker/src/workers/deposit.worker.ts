@@ -307,14 +307,63 @@ async function processDeposit(job: Job<DepositJobData>) {
         `[deposit] Bought ${score.tokenSymbol}: ${solForToken.toFixed(4)} SOL → ${quote.outAmount} tokens`
       )
     } catch (err) {
-      logger.error(`[deposit] Failed to buy ${score.tokenSymbol}: ${err}`)
-      if (pending) {
+      logger.info(`[deposit] buy failed ${score.tokenSymbol} (default slippage), retrying at 15%: ${err}`)
+      try {
+        const { txBytes: txBytes2, quote: quote2, route: route2 } = await buildBuyTransaction({
+          tokenMint: score.tokenMint,
+          solAmount: lamports,
+          userPublicKey: subWallet.address,
+          slippageBps: 1500,
+        })
+        const signed2 = await signVersionedTxBytes({
+          walletId: subWallet.privyWalletId,
+          txBytes: txBytes2,
+        })
+        const sig2 = await submitAndConfirm(signed2)
         await db.swapExecution.update({
           where: { id: pending.id },
-          data: { status: 'FAILED', errorMessage: String(err).slice(0, 500) },
-        }).catch(() => {})
+          data: {
+            inputAmount: lamports,
+            outputAmount: BigInt(quote2.outAmount),
+            slippageBps: quote2.slippageBps,
+            route: route2,
+            status: 'CONFIRMED',
+            txSignature: sig2,
+            confirmedAt: new Date(),
+          },
+        })
+        await db.holding.upsert({
+          where: {
+            subWalletId_tokenMint: {
+              subWalletId: subWallet.id,
+              tokenMint: score.tokenMint,
+            },
+          },
+          update: {
+            amount: { increment: BigInt(quote2.outAmount) },
+            valueSolEst: { increment: solForToken },
+            costBasisSol: { increment: solForToken },
+            totalBoughtSol: { increment: solForToken },
+          },
+          create: {
+            subWalletId: subWallet.id,
+            tokenMint: score.tokenMint,
+            amount: BigInt(quote2.outAmount),
+            valueSolEst: solForToken,
+            costBasisSol: solForToken,
+            totalBoughtSol: solForToken,
+          },
+        })
+        logger.info(`[deposit] buy succeeded on 15% retry: ${score.tokenSymbol}`)
+      } catch (retryErr) {
+        logger.error(`[deposit] buy failed ${score.tokenSymbol} even at 15%: ${retryErr}`)
+        if (pending) {
+          await db.swapExecution.update({
+            where: { id: pending.id },
+            data: { status: 'FAILED', errorMessage: String(retryErr).slice(0, 500) },
+          }).catch(() => {})
+        }
       }
-      // Continue with other tokens — don't fail entire allocation
     }
   }
 

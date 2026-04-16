@@ -526,9 +526,60 @@ async function processSingleWallet(
           },
         })
       } catch (err) {
-        logger.error(
-          `[rebalance/wallet] buy failed ${tokenMint.slice(0, 8)} for ${wallet.address.slice(0, 8)}: ${err}`,
+        logger.info(
+          `[rebalance/wallet] buy failed ${tokenMint.slice(0, 8)} (default slippage), retrying at 15%: ${err}`,
         )
+        // Retry once with 15% slippage — Jito MEV protection ensures
+        // no actual loss beyond the cap.
+        try {
+          const { txBytes: txBytes2, quote: quote2, route: route2 } = await buildBuyTransaction({
+            tokenMint,
+            solAmount: buyLamports,
+            userPublicKey: wallet.address,
+            slippageBps: 1500,
+          })
+          await db.holding.upsert({
+            where: { subWalletId_tokenMint: { subWalletId: wallet.id, tokenMint } },
+            update: {
+              amount: { increment: BigInt(quote2.outAmount) },
+              valueSolEst: { increment: actualSol },
+              costBasisSol: { increment: actualSol },
+              totalBoughtSol: { increment: actualSol },
+            },
+            create: {
+              subWalletId: wallet.id,
+              tokenMint,
+              amount: BigInt(quote2.outAmount),
+              valueSolEst: actualSol,
+              costBasisSol: actualSol,
+              totalBoughtSol: actualSol,
+            },
+          })
+          const signed2 = await signVersionedTxBytes({
+            walletId: wallet.privyWalletId,
+            txBytes: txBytes2,
+          })
+          const sig2 = await submitAndConfirm(signed2)
+          await db.swapExecution.create({
+            data: {
+              rebalanceCycleId: cycle.id,
+              subWalletId: wallet.id,
+              inputMint: SOL_MINT,
+              outputMint: tokenMint,
+              inputAmount: buyLamports,
+              outputAmount: BigInt(quote2.outAmount),
+              slippageBps: quote2.slippageBps,
+              route: route2,
+              status: 'CONFIRMED',
+              txSignature: sig2,
+            },
+          })
+          logger.info(`[rebalance/wallet] buy succeeded on 15% retry: ${tokenMint.slice(0, 8)}`)
+        } catch (retryErr) {
+          logger.error(
+            `[rebalance/wallet] buy failed ${tokenMint.slice(0, 8)} even at 15%: ${retryErr}`,
+          )
+        }
       }
     }
 

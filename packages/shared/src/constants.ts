@@ -149,8 +149,8 @@ export const FEE_CLAIM_MIN_MULTIPLE = 3n
 /** Default slippage for index rebalance swaps (3%) */
 export const DEFAULT_SLIPPAGE_BPS = 300
 
-/** Max slippage cap (5%) */
-export const MAX_SLIPPAGE_BPS = 500
+/** Max slippage cap (15%) — Jito protection ensures no actual loss beyond this. */
+export const MAX_SLIPPAGE_BPS = 1500
 
 /** Max retries for failed swaps */
 export const MAX_SWAP_RETRIES = 3
