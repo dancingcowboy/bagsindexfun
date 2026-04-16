@@ -454,15 +454,29 @@ async function processSingleWallet(
       }
     }
 
-    // Buys
+    // Buys — no deadband on positive diffs. When the desired amount
+    // exceeds what the rule (liquidity cap) or available native SOL
+    // permits, buy the max the rule allows instead of skipping
+    // entirely. Small drifts still close toward target each cycle;
+    // large drifts partial-fill and finish over the next few cycles.
     for (const [tokenMint, targetWeight] of targetWeights) {
       const currentWeight = currentAllocations.get(tokenMint) ?? 0
       const diff = targetWeight - currentWeight
-      if (diff <= 0.02) continue
+      if (diff <= 0) continue
       const desiredSol = diff * totalValueSol
       const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
       if (desiredLamports <= 0n) continue
-      const buyLamports = await capInputToLiquidity(tokenMint, desiredLamports)
+      const liqCapped = await capInputToLiquidity(tokenMint, desiredLamports)
+      // Also cap by remaining deployable native SOL so we never try to
+      // swap more than the wallet holds — avoids insufficient-funds
+      // failures that would otherwise silently skip this mint.
+      const currentNativeLamports = await getNativeSolBalanceLamports(wallet.address)
+      const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
+      const deployable = currentNativeLamports > reserveLamports
+        ? currentNativeLamports - reserveLamports
+        : 0n
+      const buyLamports = liqCapped > deployable ? deployable : liqCapped
+      if (buyLamports <= 0n) continue
       const actualSol = Number(buyLamports) / LAMPORTS_PER_SOL
       try {
         const { txBytes, quote, route } = await buildBuyTransaction({
