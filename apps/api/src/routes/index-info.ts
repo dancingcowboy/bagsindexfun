@@ -83,8 +83,9 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         return { success: true, data: { cycleId: null, tokens: [] } }
       }
 
+      // Square-root weighting: w_i = √score_i / Σ √score_j.
       const totalScore = latestCycle.scores.reduce(
-        (sum, s) => sum + Number(s.compositeScore),
+        (sum, s) => sum + Math.sqrt(Number(s.compositeScore)),
         0
       )
 
@@ -109,7 +110,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         rank: s.rank,
         weightPct:
           totalScore > 0
-            ? ((Number(s.compositeScore) / totalScore) * 100 * scoredScale).toFixed(2)
+            ? ((Math.sqrt(Number(s.compositeScore)) / totalScore) * 100 * scoredScale).toFixed(2)
             : '0',
       }))
 
@@ -289,11 +290,13 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         for (const c of cycles) {
           const scores = allScores.filter((s) => s.cycleId === c.id)
           const basket = new Map<string, number>()
-          const total = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
+          // Square-root weighting (matches live rebalance worker).
+          const total =
+            scores.reduce((a, s) => a + Math.sqrt(Number(s.compositeScore)), 0) || 1
           for (const s of scores) {
             basket.set(
               s.tokenMint,
-              (Number(s.compositeScore) / total) * scoredScale,
+              (Math.sqrt(Number(s.compositeScore)) / total) * scoredScale,
             )
             allMints.add(s.tokenMint)
           }

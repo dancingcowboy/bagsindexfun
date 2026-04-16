@@ -51,8 +51,8 @@ interface Props {
   title?: string
   subtitle?: string
   /**
-   * Optional tier to fetch the aggregated index line (weighted, chained across
-   * rebalances) from /index/aggregate-history and overlay on the chart.
+   * Optional tier to fetch the aggregated index line (√score-weighted, chained
+   * across rebalances) from /index/aggregate-history and overlay on the chart.
    */
   aggregateTier?: Tier
   /**

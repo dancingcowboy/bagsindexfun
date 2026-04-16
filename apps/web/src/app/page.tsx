@@ -211,7 +211,7 @@ export default function LandingPage() {
           <TokenPriceChart
             tierSelectable
             title="Live Tier Performance"
-            subtitle="Top-10 token prices + weighted index line · switch tiers to compare"
+            subtitle="Top-10 token prices + √score-weighted index line · switch tiers to compare"
           />
 
           <div className="mt-16">
@@ -259,7 +259,7 @@ export default function LandingPage() {
               step: '02',
               icon: <BarChart3 className="h-5 w-5" />,
               title: 'AI Allocates',
-              desc: 'Our AI agent picks 10 tokens per tier, weighted by volume, holder growth, and liquidity. Each tier has a distinct risk profile.',
+              desc: 'Our AI agent picks 10 tokens per tier, scored on volume, holder growth, and liquidity, then allocated by the square root of that score so top picks lead without dominating. Each tier has a distinct risk profile.',
             },
             {
               step: '03',

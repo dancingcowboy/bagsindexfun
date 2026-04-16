@@ -885,7 +885,7 @@ export async function adminRoutes(app: FastifyInstance) {
    * same algorithm as the public BAGS /index/aggregate-history but scoped
    * to `source: 'DEXSCREENER'` so the chart on /admin/dex reflects the
    * actual tokens in the list below, not the live BAGS vaults. Pure
-   * top-10 weighted by compositeScore (no BAGSX, no SOL anchor — those
+   * top-10 weighted by √compositeScore (no BAGSX, no SOL anchor — those
    * concepts don't exist in the dex product). Normalized to 100 at the
    * first bucket in range; marks basket switches with `rebalance: true`.
    */
@@ -948,10 +948,12 @@ export async function adminRoutes(app: FastifyInstance) {
         const allMints = new Set<string>()
         for (const c of cycles) {
           const scores = allScores.filter((s) => s.cycleId === c.id)
-          const total = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
+          // Square-root weighting (matches live rebalance worker).
+          const total =
+            scores.reduce((a, s) => a + Math.sqrt(Number(s.compositeScore)), 0) || 1
           const basket = new Map<string, number>()
           for (const s of scores) {
-            basket.set(s.tokenMint, Number(s.compositeScore) / total)
+            basket.set(s.tokenMint, Math.sqrt(Number(s.compositeScore)) / total)
             allMints.add(s.tokenMint)
           }
           basketByCycle.set(c.id, basket)

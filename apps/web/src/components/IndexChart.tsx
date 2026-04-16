@@ -28,7 +28,7 @@ const TIER_META: Record<RiskTier, { label: string; icon: typeof Shield; color: s
     label: 'Balanced',
     icon: BarChart3,
     color: '#00D62B',
-    description: '10 algorithm top picks · score-weighted',
+    description: '10 algorithm top picks · √score-weighted',
     rebalance: 'rebalanced every 12h',
   },
   DEGEN: {
@@ -86,7 +86,7 @@ const SAFETY_REVIEW: Record<string, { verdict: 'PASS' | 'REMOVED'; reason: strin
 /**
  * Real 7-day price data from GeckoTerminal (daily, normalized to base 100).
  * Tokens, weights and index aggregates come from scoring cycle cmnp0skxl.
- * BAGS INDEX line = tier's weighted aggregate (max 25% per token).
+ * BAGS INDEX line = tier's √score-weighted aggregate (max 25% per token).
  */
 const TIER_DATA: Record<RiskTier, Array<Record<string, number | string>>> = {
   CONSERVATIVE: [

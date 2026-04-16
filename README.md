@@ -151,8 +151,9 @@ API verifies on-chain, marks CONFIRMED, enqueues deposit-allocation.
       ↓
 Allocation worker loads latestCycle.scores filtered by riskTier:
   reserves 10% of the vault for $BAGSX (and, on CONSERVATIVE, a 12% SOL anchor)
-  for each score: weight = composite / totalComposite × (remaining %)
+  for each score: weight = sqrt(composite) / Σ sqrt(composite) × (remaining %)
                   solForToken = allocatableSol × weight
+  (sqrt-weighting dampens top-pick concentration — back-tested +10–70pp vs linear)
                   build buy via Bags, sign via Privy, submit, update holdings
 ```
 

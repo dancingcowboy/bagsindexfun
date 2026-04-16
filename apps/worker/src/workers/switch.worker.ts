@@ -123,8 +123,9 @@ async function processSwitch(job: Job<SwitchJobData>) {
       throw new Error('No destination scoring cycle available')
     }
 
+    // Square-root weighting: w_i = √score_i / Σ √score_j.
     const totalScore = latestCycle.scores.reduce(
-      (s, x) => s + Number(x.compositeScore),
+      (s, x) => s + Math.sqrt(Number(x.compositeScore)),
       0,
     )
     if (totalScore <= 0) throw new Error('Destination weights sum to zero')
@@ -132,7 +133,7 @@ async function processSwitch(job: Job<SwitchJobData>) {
     // targets: mint → target SOL value in the dest wallet after switch
     const targets = new Map<string, number>()
     for (const score of latestCycle.scores) {
-      const w = Number(score.compositeScore) / totalScore
+      const w = Math.sqrt(Number(score.compositeScore)) / totalScore
       targets.set(score.tokenMint, netSol * w)
     }
     // Fixed BAGSX exposure slice — treated as any other target mint by the

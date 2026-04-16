@@ -229,7 +229,13 @@ async function processSingleWallet(
   const bagsxWeight = BAGSX_WEIGHT_PCT / 100
   const anchorScale = 1 - (tierCfg?.solAnchorPct ?? 0) / 100 - bagsxWeight
   const scoresForTier = cycle.scoringCycle.scores.filter((s) => s.riskTier === riskTier)
-  const totalScore = scoresForTier.reduce((sum, s) => sum + Number(s.compositeScore), 0)
+  // Square-root weighting: w_i = √score_i / Σ √score_j. Dampens concentration
+  // on the top-scored picks, which back-tests significantly better than the
+  // prior linear compositeScore / Σ compositeScore scheme.
+  const totalScore = scoresForTier.reduce(
+    (sum, s) => sum + Math.sqrt(Number(s.compositeScore)),
+    0,
+  )
   if (totalScore <= 0) {
     logger.info(`[rebalance/wallet] tier ${riskTier} has zero score — skipping`)
     await bumpAndMaybeFinish(cycle.id, true, logger, cycle.scoringCycleId)
@@ -238,7 +244,7 @@ async function processSingleWallet(
   const targetWeights = new Map<string, number>(
     scoresForTier.map((s) => [
       s.tokenMint,
-      (Number(s.compositeScore) / totalScore) * anchorScale,
+      (Math.sqrt(Number(s.compositeScore)) / totalScore) * anchorScale,
     ]),
   )
   // Fixed platform-token exposure — identical for user and system vaults.

@@ -136,9 +136,9 @@ async function processDeposit(job: Job<DepositJobData>) {
     return
   }
 
-  // Calculate weights from remaining tokens only
+  // Square-root weighting: w_i = √score_i / Σ √score_j.
   const totalScore = remainingScores.reduce(
-    (sum, s) => sum + Number(s.compositeScore),
+    (sum, s) => sum + Math.sqrt(Number(s.compositeScore)),
     0
   )
 
@@ -162,7 +162,7 @@ async function processDeposit(job: Job<DepositJobData>) {
     pendingSwaps.push({ id: row.id, mint: BAGSX_MINT, lamports: bagsxLamports })
   }
   for (const score of remainingScores) {
-    const weightPct = Number(score.compositeScore) / totalScore
+    const weightPct = Math.sqrt(Number(score.compositeScore)) / totalScore
     const desiredSol = allocatableSol * weightPct
     const desiredLamports = BigInt(Math.floor(desiredSol * LAMPORTS_PER_SOL))
     if (desiredLamports <= 0n) continue

@@ -789,7 +789,7 @@ export default function AdminPage() {
                   tierSelectable
                   initialTier={vault.data?.data?.subWallets[0]?.riskTier as 'CONSERVATIVE' | 'BALANCED' | 'DEGEN' | undefined}
                   title="Compare Indexes (Vault)"
-                  subtitle="Top-10 token prices + weighted index line · switch tiers to compare before flipping vault"
+                  subtitle="Top-10 token prices + √score-weighted index line · switch tiers to compare before flipping vault"
                 />
 
                 <Panel title="Vault Sub-Wallets">
