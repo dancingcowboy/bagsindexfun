@@ -63,6 +63,13 @@ interface Props {
    */
   tierSelectable?: boolean
   initialTier?: Tier
+  /**
+   * Override for the aggregate index endpoint. Defaults to the public BAGS
+   * `/index/aggregate-history`. Admin dex page passes
+   * `/admin/dex-aggregate-history` so the index line reflects the
+   * DexScreener-sourced top-10, not the live BAGS vaults.
+   */
+  aggregateEndpoint?: string
 }
 
 export function TokenPriceChart({
@@ -72,6 +79,7 @@ export function TokenPriceChart({
   aggregateTier,
   tierSelectable = false,
   initialTier = 'BALANCED',
+  aggregateEndpoint = '/index/aggregate-history',
 }: Props = {}) {
   const [hours, setHours] = useState<number>(168)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -101,12 +109,17 @@ export function TokenPriceChart({
     refetchInterval: 5 * 60_000,
   })
 
+  const isAdminAggregate = aggregateEndpoint.startsWith('/admin/')
   const aggQ = useQuery({
-    queryKey: ['index-aggregate-history', activeTier, hours],
+    queryKey: ['index-aggregate-history', aggregateEndpoint, activeTier, hours],
     enabled: !!activeTier,
     queryFn: async () => {
       const res = await fetch(
-        `${API_BASE}/index/aggregate-history?tier=${activeTier}&hours=${hours}`,
+        `${API_BASE}${aggregateEndpoint}?tier=${activeTier}&hours=${hours}`,
+        {
+          credentials: isAdminAggregate ? 'include' : 'omit',
+          headers: isAdminAggregate ? authHeaders() : {},
+        },
       )
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {

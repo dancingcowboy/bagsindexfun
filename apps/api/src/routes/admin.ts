@@ -879,6 +879,207 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   /**
+   * GET /admin/dex-aggregate-history?tier=BALANCED&hours=168
+   *
+   * Honest-replay index line for the DexScreener-sourced admin hotlist —
+   * same algorithm as the public BAGS /index/aggregate-history but scoped
+   * to `source: 'DEXSCREENER'` so the chart on /admin/dex reflects the
+   * actual tokens in the list below, not the live BAGS vaults. Pure
+   * top-10 weighted by compositeScore (no BAGSX, no SOL anchor — those
+   * concepts don't exist in the dex product). Normalized to 100 at the
+   * first bucket in range; marks basket switches with `rebalance: true`.
+   */
+  app.get<{ Querystring: { tier?: string; hours?: string } }>(
+    '/dex-aggregate-history',
+    async (req, reply) => {
+      try {
+        const tier = (req.query.tier ?? 'BALANCED').toUpperCase() as
+          | 'CONSERVATIVE'
+          | 'BALANCED'
+          | 'DEGEN'
+        if (!['CONSERVATIVE', 'BALANCED', 'DEGEN'].includes(tier)) {
+          return reply.status(400).send({ error: 'Invalid tier' })
+        }
+        const hours = Math.min(
+          Math.max(parseInt(req.query.hours ?? '168', 10) || 168, 1),
+          24 * 90,
+        )
+        const HOUR_MS = 60 * 60 * 1000
+        const since = new Date(Date.now() - hours * HOUR_MS)
+
+        const [activeAtStart, withinRange] = await Promise.all([
+          db.scoringCycle.findFirst({
+            where: {
+              status: 'COMPLETED',
+              source: 'DEXSCREENER',
+              tier,
+              completedAt: { not: null, lte: since },
+            },
+            orderBy: { completedAt: 'desc' },
+            select: { id: true, completedAt: true },
+          }),
+          db.scoringCycle.findMany({
+            where: {
+              status: 'COMPLETED',
+              source: 'DEXSCREENER',
+              tier,
+              completedAt: { gt: since },
+            },
+            orderBy: { completedAt: 'asc' },
+            select: { id: true, completedAt: true },
+          }),
+        ])
+        const cycles = [...(activeAtStart ? [activeAtStart] : []), ...withinRange]
+        if (cycles.length === 0) {
+          return { success: true, data: { tier, points: [] } }
+        }
+
+        const allScores = await db.tokenScore.findMany({
+          where: {
+            cycleId: { in: cycles.map((c) => c.id) },
+            riskTier: tier,
+            source: 'DEXSCREENER',
+            isBlacklisted: false,
+            rank: { gte: 1, lte: 10 },
+          },
+          select: { cycleId: true, tokenMint: true, compositeScore: true },
+        })
+        const basketByCycle = new Map<string, Map<string, number>>()
+        const allMints = new Set<string>()
+        for (const c of cycles) {
+          const scores = allScores.filter((s) => s.cycleId === c.id)
+          const total = scores.reduce((a, s) => a + Number(s.compositeScore), 0) || 1
+          const basket = new Map<string, number>()
+          for (const s of scores) {
+            basket.set(s.tokenMint, Number(s.compositeScore) / total)
+            allMints.add(s.tokenMint)
+          }
+          basketByCycle.set(c.id, basket)
+        }
+
+        const priceSince = new Date(since.getTime() - 24 * HOUR_MS)
+        const samples = await db.tokenPriceSnapshot.findMany({
+          where: {
+            tokenMint: { in: [...allMints] },
+            createdAt: { gte: priceSince },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { tokenMint: true, priceSol: true, createdAt: true },
+        })
+        if (samples.length === 0) {
+          return { success: true, data: { tier, points: [] } }
+        }
+        const seriesByMint = new Map<string, { t: number; price: number }[]>()
+        for (const s of samples) {
+          const arr = seriesByMint.get(s.tokenMint) ?? []
+          arr.push({ t: s.createdAt.getTime(), price: Number(s.priceSol) })
+          seriesByMint.set(s.tokenMint, arr)
+        }
+        const priceAt = (mint: string, t: number): number | null => {
+          const arr = seriesByMint.get(mint)
+          if (!arr || arr.length === 0) return null
+          let lo = 0
+          let hi = arr.length - 1
+          let chosen = -1
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1
+            if (arr[mid].t <= t) {
+              chosen = mid
+              lo = mid + 1
+            } else {
+              hi = mid - 1
+            }
+          }
+          if (chosen < 0) return null
+          return arr[chosen].price
+        }
+
+        const cycleTimes = cycles.map((c) => ({
+          t: c.completedAt!.getTime(),
+          id: c.id,
+        }))
+        const activeCycleAt = (t: number): string | null => {
+          let lo = 0
+          let hi = cycleTimes.length - 1
+          let chosen = -1
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1
+            if (cycleTimes[mid].t <= t) {
+              chosen = mid
+              lo = mid + 1
+            } else {
+              hi = mid - 1
+            }
+          }
+          return chosen < 0 ? null : cycleTimes[chosen].id
+        }
+
+        const startBucket = new Date(since)
+        startBucket.setMinutes(0, 0, 0)
+        const nowFloor = new Date()
+        nowFloor.setMinutes(0, 0, 0)
+        const orderedTimes: number[] = []
+        for (let t = startBucket.getTime(); t <= nowFloor.getTime(); t += HOUR_MS) {
+          orderedTimes.push(t)
+        }
+
+        const points: { t: string; indexed: number; rebalance?: boolean }[] = []
+        let index = 100
+        let prevTime = -1
+        let prevCycleId: string | null = null
+        for (const t of orderedTimes) {
+          const cycleId = activeCycleAt(t)
+          if (!cycleId) continue
+          const basket = basketByCycle.get(cycleId)
+          if (!basket) continue
+
+          if (prevTime < 0) {
+            let any = false
+            for (const mint of basket.keys()) {
+              if (priceAt(mint, t) !== null) { any = true; break }
+            }
+            if (!any) continue
+            points.push({ t: new Date(t).toISOString(), indexed: 100 })
+            prevTime = t
+            prevCycleId = cycleId
+            continue
+          }
+
+          if (cycleId !== prevCycleId) {
+            points.push({ t: new Date(t).toISOString(), indexed: index, rebalance: true })
+            prevTime = t
+            prevCycleId = cycleId
+            continue
+          }
+
+          let stepRet = 0
+          let wSum = 0
+          for (const [mint, w] of basket) {
+            const p0 = priceAt(mint, prevTime)
+            const p1 = priceAt(mint, t)
+            if (p0 !== null && p1 !== null && p0 > 0) {
+              stepRet += w * (p1 / p0 - 1)
+              wSum += w
+            }
+          }
+          if (wSum > 0) {
+            stepRet /= wSum
+            index = index * (1 + stepRet)
+          }
+          points.push({ t: new Date(t).toISOString(), indexed: index })
+          prevTime = t
+          prevCycleId = cycleId
+        }
+
+        return { success: true, data: { tier, points } }
+      } catch (err) {
+        app.log.error(err, 'Failed to compute dex aggregate index history')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * POST /admin/trigger-rebalance
    */
   app.post('/trigger-rebalance', async (_req, reply) => {

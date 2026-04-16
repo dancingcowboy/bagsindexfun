@@ -297,6 +297,7 @@ export default function AdminDexHotlistPage() {
         <div className="mb-6">
           <TokenPriceChart
             endpoint="/admin/dex-price-history"
+            aggregateEndpoint="/admin/dex-aggregate-history"
             tierSelectable
             initialTier="BALANCED"
             title="DexScreener Top-10 Price History"
