@@ -3,7 +3,6 @@ import { db } from '@bags-index/db'
 import {
   getBagsSolValue,
   getMintDecimalsBatch,
-  getJupiterPrices,
   getDexVolumes,
   getLiveHoldings,
 } from '@bags-index/solana'
@@ -136,23 +135,40 @@ export async function processSnapshot(_job?: Job) {
     if (mintList.length > 0) {
       const decimals = await getMintDecimalsBatch(mintList)
 
-      // Fallback price sources for tokens with no Bags route (common for
-      // DEGEN tier). We try Bags first (the hackathon target), then
-      // DexScreener (best general coverage on Solana memes), then Jupiter.
-      // USD prices are converted to SOL via SOL/USD from Jupiter.
-      const [dexPrices, jupPrices] = await Promise.all([
-        getDexVolumes(mintList),
-        getJupiterPrices([...mintList, SOL_MINT]),
-      ])
-      const solUsd = Number(jupPrices.get(SOL_MINT)?.usdPrice ?? 0)
+      // Price sources: Bags router (Bags tokens), then DexScreener (everything
+      // else). Jupiter dropped — 429 rate limits were blocking all non-Bags
+      // pricing because SOL/USD came from Jupiter.
+      // SOL/USD from DexScreener — single dedicated fetch so it never blocks.
+      const dexPrices = await getDexVolumes([...mintList, SOL_MINT])
+      let solUsd = Number(dexPrices.get(SOL_MINT)?.priceUsd ?? 0)
+      if (solUsd <= 0) {
+        // Dedicated SOL lookup via DexScreener pairs endpoint
+        try {
+          const solRes = await fetch(
+            'https://api.dexscreener.com/tokens/v1/solana/So11111111111111111111111111111111111111112',
+            { signal: AbortSignal.timeout(10_000) },
+          )
+          const solData = await solRes.json() as any
+          const pairs: any[] = Array.isArray(solData) ? solData : solData?.pairs ?? []
+          if (pairs.length > 0) {
+            const best = pairs.reduce((a: any, p: any) =>
+              (Number(p?.liquidity?.usd) || 0) > (Number(a?.liquidity?.usd) || 0) ? p : a,
+              pairs[0],
+            )
+            solUsd = Number(best?.priceUsd) || 0
+          }
+        } catch { /* will skip USD-denominated pricing this cycle */ }
+      }
+      if (solUsd > 0) logger.info(`[price-snapshot] SOL/USD: $${solUsd.toFixed(2)}`)
 
       let priceWrites = 0
       let bagsHits = 0
       let dexHits = 0
-      let jupHits = 0
       for (const mint of mintList) {
+        if (mint === SOL_MINT) continue
         let priceSol: number | null = null
 
+        // 1. Bags router (native Bags tokens)
         const dec = decimals.get(mint)
         if (dec !== undefined) {
           const probe = (10n ** BigInt(dec)).toString()
@@ -164,19 +180,12 @@ export async function processSnapshot(_job?: Job) {
           await new Promise((r) => setTimeout(r, 100))
         }
 
+        // 2. DexScreener USD → SOL conversion
         if (priceSol === null && solUsd > 0) {
           const usd = Number(dexPrices.get(mint)?.priceUsd ?? 0)
           if (usd > 0) {
             priceSol = usd / solUsd
             dexHits++
-          }
-        }
-
-        if (priceSol === null && solUsd > 0) {
-          const usd = Number(jupPrices.get(mint)?.usdPrice ?? 0)
-          if (usd > 0) {
-            priceSol = usd / solUsd
-            jupHits++
           }
         }
 
@@ -188,7 +197,7 @@ export async function processSnapshot(_job?: Job) {
         priceWrites++
       }
       logger.info(
-        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} dex=${dexHits} jup=${jupHits})`,
+        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} dex=${dexHits})`,
       )
 
       // Refresh marketCapUsd on the latest TokenScore for each mint so
