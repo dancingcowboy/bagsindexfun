@@ -252,17 +252,36 @@ async function processDexScoring(job: Job) {
     }
 
     // 9. Price snapshots for charting — one row per mint per cycle.
-    //    Uses DexScreener USD price → SOL via current SOL/USD from the
-    //    highest-volume token's priceUsd ratio. Keep it simple: store price_sol
-    //    as priceUsd / solUsdApprox. We derive solUsd from the heaviest mint
-    //    already paired against SOL (most DexScreener Solana pairs quote vs SOL).
-    //    If none of the top picks have a SOL pair ref we fall back to writing
-    //    priceSol = priceUsd (treated as relative; chart normalizes anyway).
-    //    Chart component normalizes to 100 at range start, so absolute unit doesn't matter.
+    //    Convert USD → SOL so values are consistent with the hourly
+    //    price-snapshot worker (which also stores SOL-denominated prices).
     const snapshotMints = new Set<string>()
     for (const tier of RISK_TIERS) {
       for (const t of assignedByTier.get(tier)!) snapshotMints.add(t.tokenMint)
     }
+
+    // Get SOL/USD for conversion — same approach as price-snapshot worker.
+    const SOL_MINT = 'So11111111111111111111111111111111111111112'
+    const solDex = await getDexVolumes([SOL_MINT])
+    let solUsd = Number(solDex.get(SOL_MINT)?.priceUsd ?? 0)
+    if (solUsd <= 0) {
+      try {
+        const solRes = await fetch(
+          `https://api.dexscreener.com/tokens/v1/solana/${SOL_MINT}`,
+          { signal: AbortSignal.timeout(10_000) },
+        )
+        const solData = await solRes.json() as any
+        const pairs: any[] = Array.isArray(solData) ? solData : solData?.pairs ?? []
+        if (pairs.length > 0) {
+          const best = pairs.reduce((a: any, p: any) =>
+            (Number(p?.liquidity?.usd) || 0) > (Number(a?.liquidity?.usd) || 0) ? p : a,
+            pairs[0],
+          )
+          solUsd = Number(best?.priceUsd) || 0
+        }
+      } catch { /* skip SOL pricing this cycle */ }
+    }
+    logger.info(`[dex-scoring] SOL/USD for snapshots: $${solUsd.toFixed(2)}`)
+
     const now = new Date()
     const snapshotRows: Array<{
       tokenMint: string
@@ -273,11 +292,12 @@ async function processDexScoring(job: Job) {
     for (const mint of snapshotMints) {
       const v = volumes.get(mint)
       if (!v || !(v.priceUsd > 0)) continue
-      // Store priceUsd directly in the priceSol column — chart normalizes,
-      // so the scale is irrelevant as long as it's consistent across samples.
+      // Convert USD → SOL for consistency with hourly price-snapshot worker.
+      const priceSol = solUsd > 0 ? v.priceUsd / solUsd : 0
+      if (priceSol <= 0) continue
       snapshotRows.push({
         tokenMint: mint,
-        priceSol: v.priceUsd.toFixed(12),
+        priceSol: priceSol.toFixed(12),
         marketCapUsd: v.marketCapUsd.toFixed(2),
         createdAt: now,
       })
