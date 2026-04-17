@@ -690,7 +690,7 @@ export default function DashboardPage() {
           transition={{ delay: 0.08 }}
           className="mb-8"
         >
-          <TokenPriceChart tierSelectable title="Compare Indexes" subtitle="Top-10 token prices + √score-weighted index line · switch tiers to compare" />
+          <TokenPriceChart tierSelectable vaultPnlEndpoint="/portfolio/pnl-history" title="Your Vault vs Tokens" subtitle="Top-10 token prices + your vault's actual SOL performance per tier" />
         </motion.div>
 
         {/* Pool PnL */}

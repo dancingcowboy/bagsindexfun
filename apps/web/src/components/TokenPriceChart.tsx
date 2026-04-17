@@ -70,6 +70,13 @@ interface Props {
    * DexScreener-sourced top-10, not the live BAGS vaults.
    */
   aggregateEndpoint?: string
+  /**
+   * When set, the INDEX line uses real vault PnL data (from PnlSnapshots)
+   * instead of the theoretical aggregate-history replay. The endpoint
+   * should return `{ data: { tiers: [{ riskTier, points: [{ t, valueSol }] }] } }`.
+   * The selected tier's valueSol series is normalized to 100 at range start.
+   */
+  vaultPnlEndpoint?: string
 }
 
 export function TokenPriceChart({
@@ -80,6 +87,7 @@ export function TokenPriceChart({
   tierSelectable = false,
   initialTier = 'BALANCED',
   aggregateEndpoint = '/index/aggregate-history',
+  vaultPnlEndpoint,
 }: Props = {}) {
   const [hours, setHours] = useState<number>(168)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -112,7 +120,7 @@ export function TokenPriceChart({
   const isAdminAggregate = aggregateEndpoint.startsWith('/admin/')
   const aggQ = useQuery({
     queryKey: ['index-aggregate-history', aggregateEndpoint, activeTier, hours],
-    enabled: !!activeTier,
+    enabled: !!activeTier && !vaultPnlEndpoint,
     queryFn: async () => {
       const res = await fetch(
         `${API_BASE}${aggregateEndpoint}?tier=${activeTier}&hours=${hours}`,
@@ -129,8 +137,43 @@ export function TokenPriceChart({
     refetchInterval: 5 * 60_000,
   })
 
+  // Real vault PnL index line — uses PnlSnapshot valueSol normalized to 100.
+  const vaultPnlQ = useQuery({
+    queryKey: ['vault-pnl-index', vaultPnlEndpoint, hours],
+    enabled: !!vaultPnlEndpoint,
+    queryFn: async () => {
+      const res = await fetch(
+        `${API_BASE}${vaultPnlEndpoint}?hours=${hours}`,
+        { credentials: 'include', headers: authHeaders() },
+      )
+      if (!res.ok) throw new Error(`${res.status}`)
+      return (await res.json()) as {
+        data: {
+          tiers: { riskTier: string | null; points: { t: string; valueSol: string }[] }[]
+        }
+      }
+    },
+    refetchInterval: 5 * 60_000,
+  })
+
   const tokens = q.data?.data?.tokens ?? []
-  const aggPoints = aggQ.data?.data?.points ?? []
+
+  // Derive INDEX line points: from vault PnL (real) or aggregate-history (theoretical)
+  const aggPoints: { t: string; indexed: number; rebalance?: boolean }[] = useMemo(() => {
+    if (vaultPnlEndpoint && vaultPnlQ.data) {
+      const tierData = activeTier
+        ? vaultPnlQ.data.data.tiers.find((t) => t.riskTier === activeTier)
+        : vaultPnlQ.data.data.tiers[0]
+      if (!tierData || tierData.points.length === 0) return []
+      const base = Number(tierData.points[0].valueSol)
+      if (base <= 0) return []
+      return tierData.points.map((p) => ({
+        t: p.t,
+        indexed: (Number(p.valueSol) / base) * 100,
+      }))
+    }
+    return aggQ.data?.data?.points ?? []
+  }, [vaultPnlEndpoint, vaultPnlQ.data, aggQ.data, activeTier])
 
   // Merge all token series onto a common timeline keyed by ISO timestamp.
   // Each row carries { t, SYMBOL1: indexed, SYMBOL2: indexed, ... }.
