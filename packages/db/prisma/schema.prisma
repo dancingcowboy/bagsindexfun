@@ -42,7 +42,8 @@ model SubWallet {
   userId        String          @map("user_id")
   privyWalletId String          @unique @map("privy_wallet_id")
   address       String          @unique
-  riskTier      RiskTier        @map("risk_tier")
+  /// Null for custom vaults (no standard tier).
+  riskTier      RiskTier?       @map("risk_tier")
   realizedPnlSol Decimal        @default(0) @map("realized_pnl_sol") @db.Decimal(20, 9)
   lastForceRebalanceAt DateTime? @map("last_force_rebalance_at")
   /// 0 = compound all surplus (default). 100 = withdraw all surplus on every AUTO cycle.
@@ -51,6 +52,7 @@ model SubWallet {
   user          User            @relation(fields: [userId], references: [id])
   holdings      Holding[]
   executions    SwapExecution[]
+  customVault   CustomVault?
 
   @@unique([userId, riskTier])
   @@index([riskTier])
@@ -483,4 +485,26 @@ model Tweet {
 
   @@index([status, scheduledAt])
   @@map("tweets")
+}
+
+// ─── Custom Vaults ─────────────────────────────────────────────────────────
+
+/**
+ * Admin-created equal-weight vault. Users add token CAs manually;
+ * a dedicated worker rebalances on a per-vault cadence (min 2h).
+ * Each vault owns one SubWallet with riskTier=null.
+ * Allocation: equal weight across tokenMints + 10% BAGSX pinned.
+ */
+model CustomVault {
+  id                   String    @id @default(cuid())
+  subWalletId          String    @unique @map("sub_wallet_id")
+  tokenMints           String[]  @map("token_mints")
+  rebalanceIntervalSec Int       @map("rebalance_interval_sec")
+  status               String    @default("ACTIVE") // ACTIVE | PAUSED
+  lastRebalancedAt     DateTime? @map("last_rebalanced_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  subWallet            SubWallet @relation(fields: [subWalletId], references: [id])
+
+  @@map("custom_vaults")
 }

@@ -90,7 +90,7 @@ async function main() {
     totalPhantoms += phantoms.length
     phantomsByWallet.push({
       address: w.address,
-      tier: w.riskTier,
+      tier: w.riskTier!,
       rows: phantoms.map((p) => ({ mint: p.mint, amount: p.amount, valueSolEst: p.valueSolEst })),
     })
 

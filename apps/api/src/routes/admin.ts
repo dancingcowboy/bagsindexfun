@@ -8,7 +8,9 @@ import {
   rebalanceQueue,
   priceSnapshotQueue,
   dexScoringQueue,
+  customVaultQueue,
 } from '../queue/queues.js'
+import { CUSTOM_VAULT_MIN_INTERVAL_SEC, QUEUE_CUSTOM_VAULT_REBALANCE } from '@bags-index/shared'
 
 /** Tweet posting interval in hours — 84 tweets every 4h = 14 days */
 const TWEET_INTERVAL_HOURS = 4
@@ -625,7 +627,7 @@ export async function adminRoutes(app: FastifyInstance) {
         tierAgg[tier] = { pools: 0, currentValueSol: 0, costBasisSol: 0, realizedSol: 0, unrealizedSol: 0, totalPnlSol: 0 }
       }
       for (const p of pools) {
-        const t = tierAgg[p.riskTier]
+        const t = tierAgg[p.riskTier!]
         t.pools++
         t.currentValueSol += Number(p.currentValueSol)
         t.costBasisSol += Number(p.costBasisSol)
@@ -1220,7 +1222,7 @@ export async function adminRoutes(app: FastifyInstance) {
             }
             const countByTier: Record<string, number> = {}
             for (const row of subWalletsByTier) {
-              countByTier[row.riskTier] = row._count
+              countByTier[row.riskTier!] = row._count
             }
             return RISK_TIERS.map((tier) => {
               const intervalH = TIER_INTERVAL_HOURS[tier]
@@ -1719,6 +1721,223 @@ export async function adminRoutes(app: FastifyInstance) {
       }
     } catch (err) {
       app.log.error(err, 'Failed to expand vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  // ─── Custom Vaults ──────────────────────────────────────────────────
+
+  /** GET /admin/custom-vaults — list all custom vaults */
+  app.get('/custom-vaults', async (_req, reply) => {
+    try {
+      const vaults = await db.customVault.findMany({
+        include: {
+          subWallet: {
+            include: { holdings: true, user: { select: { walletAddress: true } } },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      return { data: vaults }
+    } catch (err) {
+      app.log.error(err, 'Failed to list custom vaults')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /** GET /admin/custom-vaults/:id — single vault detail */
+  app.get<{ Params: { id: string } }>('/custom-vaults/:id', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({
+        where: { id: req.params.id },
+        include: {
+          subWallet: {
+            include: { holdings: true, user: { select: { walletAddress: true } } },
+          },
+        },
+      })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+      return { data: vault }
+    } catch (err) {
+      app.log.error(err, 'Failed to get custom vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/custom-vaults — create a new custom vault
+   * Body: { userId, tokenMints: string[], rebalanceIntervalSec: number }
+   */
+  app.post<{
+    Body: { userId: string; tokenMints: string[]; rebalanceIntervalSec: number }
+  }>('/custom-vaults', async (req, reply) => {
+    try {
+      const { userId, tokenMints, rebalanceIntervalSec } = req.body
+      if (!userId || !Array.isArray(tokenMints) || tokenMints.length === 0) {
+        return reply.status(400).send({ error: 'userId and tokenMints[] required' })
+      }
+      if (!rebalanceIntervalSec || rebalanceIntervalSec < CUSTOM_VAULT_MIN_INTERVAL_SEC) {
+        return reply
+          .status(400)
+          .send({ error: `rebalanceIntervalSec must be >= ${CUSTOM_VAULT_MIN_INTERVAL_SEC}` })
+      }
+
+      const user = await db.user.findUnique({ where: { id: userId } })
+      if (!user) return reply.status(404).send({ error: 'User not found' })
+
+      // Create Privy server wallet for the custom vault
+      const { walletId, address } = await createSolanaServerWallet()
+
+      const subWallet = await db.subWallet.create({
+        data: {
+          userId,
+          privyWalletId: walletId,
+          address,
+          riskTier: null,
+        },
+      })
+
+      const vault = await db.customVault.create({
+        data: {
+          subWalletId: subWallet.id,
+          tokenMints,
+          rebalanceIntervalSec,
+        },
+      })
+
+      // Register repeatable scheduler
+      await customVaultQueue.upsertJobScheduler(
+        `custom-vault-${vault.id}`,
+        { every: rebalanceIntervalSec * 1000 },
+        { name: `custom-vault-${vault.id}`, data: { customVaultId: vault.id } },
+      )
+
+      return { data: { vault, subWallet: { id: subWallet.id, address } } }
+    } catch (err) {
+      app.log.error(err, 'Failed to create custom vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * PATCH /admin/custom-vaults/:id — update token list or interval
+   * Body: { tokenMints?: string[], rebalanceIntervalSec?: number }
+   */
+  app.patch<{
+    Params: { id: string }
+    Body: { tokenMints?: string[]; rebalanceIntervalSec?: number }
+  }>('/custom-vaults/:id', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({ where: { id: req.params.id } })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+      const { tokenMints, rebalanceIntervalSec } = req.body
+      if (
+        rebalanceIntervalSec !== undefined &&
+        rebalanceIntervalSec < CUSTOM_VAULT_MIN_INTERVAL_SEC
+      ) {
+        return reply
+          .status(400)
+          .send({ error: `rebalanceIntervalSec must be >= ${CUSTOM_VAULT_MIN_INTERVAL_SEC}` })
+      }
+
+      const updated = await db.customVault.update({
+        where: { id: req.params.id },
+        data: {
+          ...(tokenMints ? { tokenMints } : {}),
+          ...(rebalanceIntervalSec ? { rebalanceIntervalSec } : {}),
+        },
+      })
+
+      // Re-register scheduler if interval changed
+      if (rebalanceIntervalSec) {
+        await customVaultQueue.upsertJobScheduler(
+          `custom-vault-${vault.id}`,
+          { every: rebalanceIntervalSec * 1000 },
+          { name: `custom-vault-${vault.id}`, data: { customVaultId: vault.id } },
+        )
+      }
+
+      return { data: updated }
+    } catch (err) {
+      app.log.error(err, 'Failed to update custom vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/custom-vaults/:id/pause — pause a vault's scheduler
+   */
+  app.post<{ Params: { id: string } }>('/custom-vaults/:id/pause', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({ where: { id: req.params.id } })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+      await db.customVault.update({ where: { id: vault.id }, data: { status: 'PAUSED' } })
+      await customVaultQueue.removeJobScheduler(`custom-vault-${vault.id}`)
+
+      return { data: { status: 'PAUSED' } }
+    } catch (err) {
+      app.log.error(err, 'Failed to pause custom vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/custom-vaults/:id/resume — resume a paused vault
+   */
+  app.post<{ Params: { id: string } }>('/custom-vaults/:id/resume', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({ where: { id: req.params.id } })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+      await db.customVault.update({ where: { id: vault.id }, data: { status: 'ACTIVE' } })
+      await customVaultQueue.upsertJobScheduler(
+        `custom-vault-${vault.id}`,
+        { every: vault.rebalanceIntervalSec * 1000 },
+        { name: `custom-vault-${vault.id}`, data: { customVaultId: vault.id } },
+      )
+
+      return { data: { status: 'ACTIVE' } }
+    } catch (err) {
+      app.log.error(err, 'Failed to resume custom vault')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * POST /admin/custom-vaults/:id/rebalance — trigger immediate rebalance
+   */
+  app.post<{ Params: { id: string } }>('/custom-vaults/:id/rebalance', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({ where: { id: req.params.id } })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+      await customVaultQueue.add(`manual-${vault.id}-${Date.now()}`, {
+        customVaultId: vault.id,
+      })
+
+      return { data: { queued: true } }
+    } catch (err) {
+      app.log.error(err, 'Failed to trigger custom vault rebalance')
+      return reply.status(500).send({ error: 'Internal server error' })
+    }
+  })
+
+  /**
+   * DELETE /admin/custom-vaults/:id — remove vault + scheduler (holdings stay)
+   */
+  app.delete<{ Params: { id: string } }>('/custom-vaults/:id', async (req, reply) => {
+    try {
+      const vault = await db.customVault.findUnique({ where: { id: req.params.id } })
+      if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+      await customVaultQueue.removeJobScheduler(`custom-vault-${vault.id}`)
+      await db.customVault.delete({ where: { id: vault.id } })
+
+      return { data: { deleted: true } }
+    } catch (err) {
+      app.log.error(err, 'Failed to delete custom vault')
       return reply.status(500).send({ error: 'Internal server error' })
     }
   })

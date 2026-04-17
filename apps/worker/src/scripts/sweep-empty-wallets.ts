@@ -50,7 +50,7 @@ async function main() {
         await db.withdrawal.create({
           data: {
             userId: sw.userId,
-            riskTier: sw.riskTier,
+            riskTier: sw.riskTier!,
             amountSol: (Number(sendable) / 1e9).toFixed(9),
             feeSol: '0',
             txSignature: sig,

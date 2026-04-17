@@ -188,3 +188,10 @@ export const REBALANCE_BATCH_SIZE = 20
 
 /** Delay between batches in ms */
 export const REBALANCE_BATCH_DELAY_MS = 500
+
+// ─── Custom Vaults ──────────────────────────────────────────────────────────
+
+export const QUEUE_CUSTOM_VAULT_REBALANCE = 'custom-vault-rebalance'
+
+/** Minimum rebalance interval for custom vaults (2 hours in seconds) */
+export const CUSTOM_VAULT_MIN_INTERVAL_SEC = 2 * 60 * 60

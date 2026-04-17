@@ -185,7 +185,7 @@ async function processFeeClaim(_job: Job) {
   // tier sub-wallets. For that wallet, skip the SOL transfer — it
   // already holds its share. For the others, transfer from primary.
   for (const sw of subWallets) {
-    const tier = sw.riskTier
+    const tier = sw.riskTier!
     const perTierSol = Number(perTierLamports) / LAMPORTS_PER_SOL
 
     // If this sub-wallet IS the primary fee-claim wallet, no transfer needed.

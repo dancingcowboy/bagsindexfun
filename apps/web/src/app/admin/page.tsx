@@ -173,7 +173,7 @@ export default function AdminPage() {
     }
   }, [privyReady, privyAuth, me.isLoading, me.isFetching, me.isError, me.data, router])
 
-  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault' | 'whitelist'>('overview')
+  const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault' | 'whitelist' | 'custom-vaults'>('overview')
 
   const [vaultLive, setVaultLive] = useState(false)
   const vault = useQuery({
@@ -252,6 +252,53 @@ export default function AdminPage() {
     queryKey: ['admin-whitelist'],
     queryFn: () => fetchJson<{ data: Array<{ id: string; walletAddress: string; maxDepositSol: string; note: string | null; addedBy: string; createdAt: string }> }>('/admin/whitelist'),
     enabled: tab === 'whitelist',
+  })
+
+  // ─── Custom Vaults ──────────────────────────────────────────────────
+  interface CustomVaultData {
+    id: string
+    tokenMints: string[]
+    rebalanceIntervalSec: number
+    status: string
+    lastRebalancedAt: string | null
+    createdAt: string
+    subWallet: {
+      id: string
+      address: string
+      holdings: Array<{ tokenMint: string; amount: string; valueSolEst: string }>
+      user: { walletAddress: string }
+    }
+  }
+
+  const customVaults = useQuery({
+    queryKey: ['admin-custom-vaults'],
+    queryFn: () => fetchJson<{ data: CustomVaultData[] }>('/admin/custom-vaults'),
+    enabled: tab === 'custom-vaults',
+    refetchInterval: tab === 'custom-vaults' ? 15_000 : false,
+  })
+
+  const [cvUserId, setCvUserId] = useState('')
+  const [cvMints, setCvMints] = useState('')
+  const [cvInterval, setCvInterval] = useState('7200')
+
+  const createCustomVault = useMutation({
+    mutationFn: () =>
+      fetch(`${API_BASE}/admin/custom-vaults`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          userId: cvUserId.trim(),
+          tokenMints: cvMints.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean),
+          rebalanceIntervalSec: parseInt(cvInterval, 10) || 7200,
+        }),
+      }).then((r) => { if (!r.ok) throw new Error(`${r.status}`); return r.json() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-custom-vaults'] })
+      setCvUserId('')
+      setCvMints('')
+      setCvInterval('7200')
+    },
   })
 
   const [wlWallet, setWlWallet] = useState('')
@@ -345,7 +392,7 @@ export default function AdminPage() {
       <main className="mx-auto max-w-7xl px-6 pt-24 pb-24">
         {/* Tabs */}
         <div className="mb-8 flex items-center gap-2 border-b border-[var(--color-border)]">
-          {(['overview', 'users', 'pnl', 'audit', 'campaign', 'vault', 'whitelist'] as const).map((t) => (
+          {(['overview', 'users', 'pnl', 'audit', 'campaign', 'vault', 'whitelist', 'custom-vaults'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -1040,6 +1087,162 @@ export default function AdminPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              )}
+            </Panel>
+          </div>
+        )}
+
+        {tab === 'custom-vaults' && (
+          <div className="space-y-6">
+            {/* Create new vault */}
+            <Panel title="Create Custom Vault">
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">User ID</label>
+                  <input
+                    type="text"
+                    value={cvUserId}
+                    onChange={(e) => setCvUserId(e.target.value)}
+                    placeholder="cuid..."
+                    className="w-full rounded border border-[var(--color-border)] bg-transparent px-3 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Token Mints (one per line or comma-separated)</label>
+                  <textarea
+                    value={cvMints}
+                    onChange={(e) => setCvMints(e.target.value)}
+                    rows={4}
+                    placeholder="DTp6oMA51Wyd...&#10;So11111111111..."
+                    className="w-full rounded border border-[var(--color-border)] bg-transparent px-3 py-1.5 font-[family-name:var(--font-mono)] text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-[var(--color-text-muted)]">Rebalance Interval (seconds, min 7200 = 2h)</label>
+                  <input
+                    type="number"
+                    value={cvInterval}
+                    onChange={(e) => setCvInterval(e.target.value)}
+                    min={7200}
+                    className="w-40 rounded border border-[var(--color-border)] bg-transparent px-3 py-1.5 text-sm"
+                  />
+                </div>
+                <button
+                  onClick={() => createCustomVault.mutate()}
+                  disabled={createCustomVault.isPending || !cvUserId || !cvMints}
+                  className="rounded bg-[#00D62B] px-4 py-1.5 text-sm font-medium text-black hover:bg-[#00D62B]/80 disabled:opacity-50"
+                >
+                  {createCustomVault.isPending ? 'Creating...' : 'Create Vault'}
+                </button>
+              </div>
+            </Panel>
+
+            {/* Vault list */}
+            <Panel title={`Custom Vaults (${customVaults.data?.data?.length ?? 0})`}>
+              {customVaults.isLoading ? (
+                <p className="text-sm text-[var(--color-text-muted)]">Loading...</p>
+              ) : !customVaults.data?.data?.length ? (
+                <p className="text-sm text-[var(--color-text-muted)]">No custom vaults yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {customVaults.data.data.map((v) => {
+                    const totalVal = v.subWallet.holdings.reduce(
+                      (s, h) => s + Number(h.valueSolEst || 0), 0,
+                    )
+                    const intervalH = (v.rebalanceIntervalSec / 3600).toFixed(1)
+                    return (
+                      <div
+                        key={v.id}
+                        className="rounded-lg border border-[var(--color-border)] p-4"
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <div>
+                            <span className="font-[family-name:var(--font-mono)] text-sm">{shortAddr(v.subWallet.address)}</span>
+                            <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+                              owner: {shortAddr(v.subWallet.user.walletAddress)}
+                            </span>
+                          </div>
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs font-medium ${
+                              v.status === 'ACTIVE'
+                                ? 'bg-[#00D62B]/20 text-[#00D62B]'
+                                : 'bg-yellow-500/20 text-yellow-400'
+                            }`}
+                          >
+                            {v.status}
+                          </span>
+                        </div>
+                        <div className="mb-2 grid grid-cols-3 gap-4 text-xs text-[var(--color-text-muted)]">
+                          <div>Value: <span className="text-[var(--color-text-primary)]">{totalVal.toFixed(4)} SOL</span></div>
+                          <div>Interval: <span className="text-[var(--color-text-primary)]">{intervalH}h</span></div>
+                          <div>Holdings: <span className="text-[var(--color-text-primary)]">{v.subWallet.holdings.length}</span></div>
+                        </div>
+                        <div className="mb-3 text-xs text-[var(--color-text-muted)]">
+                          Tokens: {v.tokenMints.map((m) => shortAddr(m)).join(', ')}
+                        </div>
+                        {v.lastRebalancedAt && (
+                          <div className="mb-3 text-xs text-[var(--color-text-muted)]">
+                            Last rebalanced: {new Date(v.lastRebalancedAt).toLocaleString()}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          {v.status === 'ACTIVE' ? (
+                            <button
+                              onClick={async () => {
+                                await fetch(`${API_BASE}/admin/custom-vaults/${v.id}/pause`, {
+                                  method: 'POST', credentials: 'include',
+                                  headers: authHeaders(),
+                                })
+                                queryClient.invalidateQueries({ queryKey: ['admin-custom-vaults'] })
+                              }}
+                              className="rounded border border-yellow-500/50 px-3 py-1 text-xs text-yellow-400 hover:bg-yellow-500/10"
+                            >
+                              Pause
+                            </button>
+                          ) : (
+                            <button
+                              onClick={async () => {
+                                await fetch(`${API_BASE}/admin/custom-vaults/${v.id}/resume`, {
+                                  method: 'POST', credentials: 'include',
+                                  headers: authHeaders(),
+                                })
+                                queryClient.invalidateQueries({ queryKey: ['admin-custom-vaults'] })
+                              }}
+                              className="rounded border border-[#00D62B]/50 px-3 py-1 text-xs text-[#00D62B] hover:bg-[#00D62B]/10"
+                            >
+                              Resume
+                            </button>
+                          )}
+                          <button
+                            onClick={async () => {
+                              await fetch(`${API_BASE}/admin/custom-vaults/${v.id}/rebalance`, {
+                                method: 'POST', credentials: 'include',
+                                headers: authHeaders(),
+                              })
+                              queryClient.invalidateQueries({ queryKey: ['admin-custom-vaults'] })
+                            }}
+                            className="rounded border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+                          >
+                            Rebalance Now
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Delete this custom vault? Holdings will remain in the sub-wallet.')) return
+                              await fetch(`${API_BASE}/admin/custom-vaults/${v.id}`, {
+                                method: 'DELETE', credentials: 'include',
+                                headers: authHeaders(),
+                              })
+                              queryClient.invalidateQueries({ queryKey: ['admin-custom-vaults'] })
+                            }}
+                            className="rounded border border-red-500/50 px-3 py-1 text-xs text-red-400 hover:bg-red-500/10"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </Panel>

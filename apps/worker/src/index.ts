@@ -6,6 +6,7 @@ import {
   QUEUE_FEE_CLAIM,
   QUEUE_PRICE_SNAPSHOT,
   QUEUE_DEX_SCORING,
+  QUEUE_CUSTOM_VAULT_REBALANCE,
   FEE_CLAIM_INTERVAL_HOURS,
 } from '@bags-index/shared'
 import { redis } from './queue/redis.js'
@@ -19,6 +20,8 @@ import { createPriceSnapshotWorker } from './workers/price-snapshot.worker.js'
 import { createSwitchWorker } from './workers/switch.worker.js'
 import { createDexScoringWorker } from './workers/dex-scoring.worker.js'
 import { startTweetPoller, stopTweetPoller } from './workers/tweet-poller.js'
+import { createCustomVaultRebalanceWorker } from './workers/custom-vault-rebalance.worker.js'
+import { db } from '@bags-index/db'
 
 console.log('[worker] Starting bags-index workers...')
 
@@ -32,6 +35,7 @@ const feeClaimWorker = createFeeClaimWorker()
 const priceSnapshotWorker = createPriceSnapshotWorker()
 const switchWorker = createSwitchWorker()
 const dexScoringWorker = createDexScoringWorker()
+const customVaultWorker = createCustomVaultRebalanceWorker()
 
 // Per-tier scoring on offset intervals — DEGEN every 4h23m, BALANCED every
 // 12h08m, CONSERVATIVE every 23h23m. Offsets stagger the three tiers so they
@@ -94,6 +98,25 @@ await dexScoringQueue.upsertJobScheduler(
   { name: 'dex-scoring' },
 )
 
+// Restore per-vault repeatable schedulers for all ACTIVE custom vaults.
+// Each vault gets its own BullMQ repeatable keyed by vault ID so
+// upsertJobScheduler is idempotent across restarts.
+const customVaultQueue = new Queue(QUEUE_CUSTOM_VAULT_REBALANCE, { connection: redis })
+const activeCustomVaults = await db.customVault.findMany({
+  where: { status: 'ACTIVE' },
+  select: { id: true, rebalanceIntervalSec: true },
+})
+for (const v of activeCustomVaults) {
+  await customVaultQueue.upsertJobScheduler(
+    `custom-vault-${v.id}`,
+    { every: v.rebalanceIntervalSec * 1000 },
+    { name: `custom-vault-${v.id}`, data: { customVaultId: v.id } },
+  )
+}
+if (activeCustomVaults.length > 0) {
+  console.log(`[worker] Restored ${activeCustomVaults.length} custom vault scheduler(s)`)
+}
+
 // Start the X campaign tweet poller (60s tick, 50min min gap)
 startTweetPoller()
 
@@ -115,6 +138,7 @@ const gracefulShutdown = async () => {
     priceSnapshotWorker.close(),
     switchWorker.close(),
     dexScoringWorker.close(),
+    customVaultWorker.close(),
   ])
   await redis.quit()
   process.exit(0)

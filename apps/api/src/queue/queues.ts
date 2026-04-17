@@ -8,6 +8,7 @@ import {
   QUEUE_PRICE_SNAPSHOT,
   QUEUE_SWITCH,
   QUEUE_DEX_SCORING,
+  QUEUE_CUSTOM_VAULT_REBALANCE,
 } from '@bags-index/shared'
 
 const defaultOpts = { connection: redis }
@@ -19,3 +20,4 @@ export const withdrawalQueue = new Queue(QUEUE_WITHDRAWAL, defaultOpts)
 export const priceSnapshotQueue = new Queue(QUEUE_PRICE_SNAPSHOT, defaultOpts)
 export const switchQueue = new Queue(QUEUE_SWITCH, defaultOpts)
 export const dexScoringQueue = new Queue(QUEUE_DEX_SCORING, defaultOpts)
+export const customVaultQueue = new Queue(QUEUE_CUSTOM_VAULT_REBALANCE, defaultOpts)

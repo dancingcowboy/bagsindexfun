@@ -279,7 +279,7 @@ async function processSingleWallet(
         db.deposit.aggregate({
           where: {
             userId: wallet.userId,
-            riskTier: wallet.riskTier,
+            riskTier: wallet.riskTier!,
             status: { in: ['CONFIRMED', 'PARTIAL' as any] },
           },
           _sum: { amountSol: true, feeSol: true },
@@ -287,7 +287,7 @@ async function processSingleWallet(
         db.withdrawal.aggregate({
           where: {
             userId: wallet.userId,
-            riskTier: wallet.riskTier,
+            riskTier: wallet.riskTier!,
             source: 'USER',
             status: { in: ['CONFIRMED', 'PARTIAL' as any] },
           },
@@ -614,7 +614,7 @@ async function processSingleWallet(
         const w = await db.withdrawal.create({
           data: {
             userId: wallet.userId,
-            riskTier: wallet.riskTier,
+            riskTier: wallet.riskTier!,
             amountSol: (Number(payout) / LAMPORTS_PER_SOL).toFixed(9),
             feeSol: '0',
             status: 'PENDING',
@@ -664,7 +664,7 @@ async function processSingleWallet(
     await notifyRebalance({
       userId: wallet.userId,
       walletId: wallet.id,
-      riskTier: wallet.riskTier,
+      riskTier: wallet.riskTier!,
       rebalanceCycleId: cycle.id,
       trigger: cycle.trigger,
     })

@@ -619,9 +619,9 @@ export async function portfolioRoutes(app: FastifyInstance) {
           ? (liveByWallet.get(w.id) ??
              w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0))
           : 0
-        const deposited = depositedByTier.get(w.riskTier) ?? 0
-        const withdrawnUser = userWdByTier.get(w.riskTier) ?? 0
-        const withdrawnAutoTp = autoTpByTier.get(w.riskTier) ?? 0
+        const deposited = depositedByTier.get(w.riskTier!) ?? 0
+        const withdrawnUser = userWdByTier.get(w.riskTier!) ?? 0
+        const withdrawnAutoTp = autoTpByTier.get(w.riskTier!) ?? 0
 
         // Proportional basis: fraction of original capital still invested
         // is currentValue / (currentValue + withdrawnUser). AUTO_TP
@@ -908,7 +908,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       }
 
       const tiers = wallets.map((w) => {
-        const flows = flowsByTier.get(w.riskTier) ?? []
+        const flows = flowsByTier.get(w.riskTier!) ?? []
         const snaps = snapsByWallet.get(w.id) ?? []
         const points = snaps.map((s) => {
           const tMs = s.createdAt.getTime()

@@ -71,7 +71,7 @@ export async function buildUserPortfolioSummary(userId: string): Promise<Portfol
     const unrealizedPnlSol = totalValueSol - costBasisSol
     const totalPnlSol = realizedPnlSol + unrealizedPnlSol
     return {
-      riskTier: w.riskTier,
+      riskTier: w.riskTier!,
       walletAddress: w.address,
       totalValueSol,
       costBasisSol,
