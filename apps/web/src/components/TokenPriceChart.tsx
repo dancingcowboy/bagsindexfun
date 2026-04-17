@@ -71,10 +71,10 @@ interface Props {
    */
   aggregateEndpoint?: string
   /**
-   * When set, the INDEX line uses real vault PnL data (from PnlSnapshots)
-   * instead of the theoretical aggregate-history replay. The endpoint
-   * should return `{ data: { tiers: [{ riskTier, points: [{ t, valueSol }] }] } }`.
-   * The selected tier's valueSol series is normalized to 100 at range start.
+   * When set, the INDEX line uses time-weighted return data (deposit/withdrawal
+   * cashflows neutralized) instead of the theoretical aggregate-history replay.
+   * Endpoint should return `{ data: { tiers: [{ riskTier, points: [{ t, twr }] }] } }`.
+   * The `twr` values are already normalized to 100 at range start.
    */
   vaultPnlEndpoint?: string
 }
@@ -137,9 +137,9 @@ export function TokenPriceChart({
     refetchInterval: 5 * 60_000,
   })
 
-  // Real vault PnL index line — uses PnlSnapshot valueSol normalized to 100.
+  // Time-weighted return index line — cashflow-neutralized, normalized to 100.
   const vaultPnlQ = useQuery({
-    queryKey: ['vault-pnl-index', vaultPnlEndpoint, hours],
+    queryKey: ['vault-twr-index', vaultPnlEndpoint, hours],
     enabled: !!vaultPnlEndpoint,
     queryFn: async () => {
       const res = await fetch(
@@ -149,7 +149,7 @@ export function TokenPriceChart({
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {
         data: {
-          tiers: { riskTier: string | null; points: { t: string; valueSol: string }[] }[]
+          tiers: { riskTier: string; points: { t: string; twr: number }[] }[]
         }
       }
     },
@@ -165,11 +165,9 @@ export function TokenPriceChart({
         ? vaultPnlQ.data.data.tiers.find((t) => t.riskTier === activeTier)
         : vaultPnlQ.data.data.tiers[0]
       if (!tierData || tierData.points.length === 0) return []
-      const base = Number(tierData.points[0].valueSol)
-      if (base <= 0) return []
       return tierData.points.map((p) => ({
         t: p.t,
-        indexed: (Number(p.valueSol) / base) * 100,
+        indexed: p.twr,
       }))
     }
     return aggQ.data?.data?.points ?? []

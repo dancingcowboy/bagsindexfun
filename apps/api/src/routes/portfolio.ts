@@ -745,10 +745,10 @@ export async function portfolioRoutes(app: FastifyInstance) {
 
       const wallets = await db.subWallet.findMany({
         where: { userId },
-        select: { id: true },
+        select: { id: true, riskTier: true },
       })
       if (wallets.length === 0) {
-        return { success: true, data: { points: [], hours, cashflowCount: 0 } }
+        return { success: true, data: { tiers: [], points: [], hours, cashflowCount: 0 } }
       }
 
       const snapshots = await db.pnlSnapshot.findMany({
@@ -757,11 +757,79 @@ export async function portfolioRoutes(app: FastifyInstance) {
           createdAt: { gte: since },
         },
         orderBy: { createdAt: 'asc' },
-        select: { totalValueSol: true, createdAt: true },
+        select: { subWalletId: true, totalValueSol: true, createdAt: true },
       })
 
-      // Sum across all sub-wallets per timestamp bucket (snapshot worker
-      // writes one row per wallet at the same instant).
+      // Build wallet→tier lookup
+      const walletTier = new Map<string, string | null>()
+      for (const w of wallets) walletTier.set(w.id, w.riskTier)
+
+      // Cashflows: deposits in - withdrawals out, both gross.
+      const [deposits, withdrawals] = await Promise.all([
+        db.deposit.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
+          select: { amountSol: true, riskTier: true, confirmedAt: true, createdAt: true },
+        }),
+        db.withdrawal.findMany({
+          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
+          select: { amountSol: true, riskTier: true, confirmedAt: true, createdAt: true },
+        }),
+      ])
+
+      // --- Per-tier TWR ---
+      const tierNames = [...new Set(wallets.map((w) => w.riskTier).filter(Boolean))] as string[]
+      const tierResults: { riskTier: string; points: { t: string; twr: number }[] }[] = []
+
+      for (const tier of tierNames) {
+        const tierWalletIds = wallets.filter((w) => w.riskTier === tier).map((w) => w.id)
+        const tierSnaps = snapshots.filter((s) => tierWalletIds.includes(s.subWalletId))
+
+        const bucket = new Map<number, number>()
+        for (const s of tierSnaps) {
+          const t = s.createdAt.getTime()
+          bucket.set(t, (bucket.get(t) ?? 0) + Number(s.totalValueSol))
+        }
+        const merged = [...bucket.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([t, v]) => ({ t: new Date(t), v }))
+        if (merged.length < 2) continue
+
+        const tierCashflows: { t: number; amount: number }[] = []
+        for (const d of deposits) {
+          if (d.riskTier === tier) {
+            tierCashflows.push({ t: (d.confirmedAt ?? d.createdAt).getTime(), amount: Number(d.amountSol) })
+          }
+        }
+        for (const w of withdrawals) {
+          if (w.riskTier === tier) {
+            tierCashflows.push({ t: (w.confirmedAt ?? w.createdAt).getTime(), amount: -Number(w.amountSol) })
+          }
+        }
+
+        const MIN_STEP = 0.5, MAX_STEP = 3.0
+        const pts: { t: string; twr: number }[] = []
+        let idx = 100
+        pts.push({ t: merged[0].t.toISOString(), twr: 100 })
+        for (let i = 1; i < merged.length; i++) {
+          const prev = merged[i - 1], cur = merged[i]
+          let cf = 0
+          for (const c of tierCashflows) {
+            if (c.t > prev.t.getTime() && c.t <= cur.t.getTime()) cf += c.amount
+          }
+          let step = 1
+          if (prev.v > 0) {
+            const adj = cur.v - cf
+            step = adj / prev.v
+            if (!isFinite(step) || step <= 0) step = 1
+            if (step < MIN_STEP || step > MAX_STEP) step = 1
+          }
+          idx *= step
+          pts.push({ t: cur.t.toISOString(), twr: idx })
+        }
+        tierResults.push({ riskTier: tier, points: pts })
+      }
+
+      // --- Aggregate (all wallets) TWR for backwards compat ---
       const bucket = new Map<number, number>()
       for (const s of snapshots) {
         const t = s.createdAt.getTime()
@@ -770,64 +838,39 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const merged = [...bucket.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([t, v]) => ({ t: new Date(t), v }))
-      if (merged.length < 2) {
-        return { success: true, data: { points: [], hours, cashflowCount: 0 } }
-      }
 
-      // Cashflows: deposits in - withdrawals out, both gross. Slippage is
-      // an internal cost that should hit the return, not be neutralized
-      // as a "user cashflow".
-      const [deposits, withdrawals] = await Promise.all([
-        db.deposit.findMany({
-          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
-          select: { amountSol: true, confirmedAt: true, createdAt: true },
-        }),
-        db.withdrawal.findMany({
-          where: { userId, status: { in: ['CONFIRMED', 'PARTIAL' as any] }, createdAt: { gte: since } },
-          select: { amountSol: true, confirmedAt: true, createdAt: true },
-        }),
-      ])
-      const cashflows: { t: number; amount: number }[] = []
+      const allCashflows: { t: number; amount: number }[] = []
       for (const d of deposits) {
-        cashflows.push({
-          t: (d.confirmedAt ?? d.createdAt).getTime(),
-          amount: Number(d.amountSol),
-        })
+        allCashflows.push({ t: (d.confirmedAt ?? d.createdAt).getTime(), amount: Number(d.amountSol) })
       }
       for (const w of withdrawals) {
-        cashflows.push({
-          t: (w.confirmedAt ?? w.createdAt).getTime(),
-          amount: -Number(w.amountSol),
-        })
+        allCashflows.push({ t: (w.confirmedAt ?? w.createdAt).getTime(), amount: -Number(w.amountSol) })
       }
 
-      // Outlier guard: clamp implausible single-hour returns to step=1.
-      // Pre-allocation zero snapshots, reconciled amount drift, and RPC
-      // blips would otherwise poison the chain.
-      const MIN_STEP = 0.5
-      const MAX_STEP = 3.0
+      const MIN_STEP = 0.5, MAX_STEP = 3.0
       const points: { t: string; twr: number; valueSol: number }[] = []
-      let index = 100
-      points.push({ t: merged[0].t.toISOString(), twr: 100, valueSol: merged[0].v })
-      for (let i = 1; i < merged.length; i++) {
-        const prev = merged[i - 1]
-        const cur = merged[i]
-        let cf = 0
-        for (const c of cashflows) {
-          if (c.t > prev.t.getTime() && c.t <= cur.t.getTime()) cf += c.amount
+      if (merged.length >= 2) {
+        let index = 100
+        points.push({ t: merged[0].t.toISOString(), twr: 100, valueSol: merged[0].v })
+        for (let i = 1; i < merged.length; i++) {
+          const prev = merged[i - 1], cur = merged[i]
+          let cf = 0
+          for (const c of allCashflows) {
+            if (c.t > prev.t.getTime() && c.t <= cur.t.getTime()) cf += c.amount
+          }
+          let step = 1
+          if (prev.v > 0) {
+            const adj = cur.v - cf
+            step = adj / prev.v
+            if (!isFinite(step) || step <= 0) step = 1
+            if (step < MIN_STEP || step > MAX_STEP) step = 1
+          }
+          index *= step
+          points.push({ t: cur.t.toISOString(), twr: index, valueSol: cur.v })
         }
-        let step = 1
-        if (prev.v > 0) {
-          const adj = cur.v - cf
-          step = adj / prev.v
-          if (!isFinite(step) || step <= 0) step = 1
-          if (step < MIN_STEP || step > MAX_STEP) step = 1
-        }
-        index *= step
-        points.push({ t: cur.t.toISOString(), twr: index, valueSol: cur.v })
       }
 
-      return { success: true, data: { points, hours, cashflowCount: cashflows.length } }
+      return { success: true, data: { tiers: tierResults, points, hours, cashflowCount: allCashflows.length } }
     } catch (err) {
       app.log.error(err, 'Failed to compute portfolio TWR')
       return reply.status(500).send({ error: 'Internal server error' })
