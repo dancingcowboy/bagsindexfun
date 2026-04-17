@@ -71,10 +71,10 @@ interface Props {
    */
   aggregateEndpoint?: string
   /**
-   * When set, the INDEX line uses time-weighted return data (deposit/withdrawal
-   * cashflows neutralized) instead of the theoretical aggregate-history replay.
-   * Endpoint should return `{ data: { tiers: [{ riskTier, points: [{ t, twr }] }] } }`.
-   * The `twr` values are already normalized to 100 at range start.
+   * When set, the INDEX line uses real vault PnL snapshots (value/cost * 100)
+   * instead of the theoretical aggregate-history replay. Matches the Pool PnL
+   * card: 100 = break-even, >100 = profit, <100 = loss.
+   * Endpoint should return `{ data: { tiers: [{ riskTier, points: [{ t, valueSol, costSol }] }] } }`.
    */
   vaultPnlEndpoint?: string
 }
@@ -137,9 +137,10 @@ export function TokenPriceChart({
     refetchInterval: 5 * 60_000,
   })
 
-  // Time-weighted return index line — cashflow-neutralized, normalized to 100.
+  // Real vault performance index line — (value / costBasis) * 100.
+  // Matches Pool PnL: 100 = break-even, >100 = profit, <100 = loss.
   const vaultPnlQ = useQuery({
-    queryKey: ['vault-twr-index', vaultPnlEndpoint, hours],
+    queryKey: ['vault-pnl-index', vaultPnlEndpoint, hours],
     enabled: !!vaultPnlEndpoint,
     queryFn: async () => {
       const res = await fetch(
@@ -149,7 +150,7 @@ export function TokenPriceChart({
       if (!res.ok) throw new Error(`${res.status}`)
       return (await res.json()) as {
         data: {
-          tiers: { riskTier: string; points: { t: string; twr: number }[] }[]
+          tiers: { riskTier: string | null; points: { t: string; valueSol: string; costSol: string }[] }[]
         }
       }
     },
@@ -165,10 +166,14 @@ export function TokenPriceChart({
         ? vaultPnlQ.data.data.tiers.find((t) => t.riskTier === activeTier)
         : vaultPnlQ.data.data.tiers[0]
       if (!tierData || tierData.points.length === 0) return []
-      return tierData.points.map((p) => ({
-        t: p.t,
-        indexed: p.twr,
-      }))
+      // value/cost * 100 = money-weighted return. Matches Pool PnL card.
+      // 100 = break-even, >100 = profit, <100 = loss.
+      return tierData.points
+        .filter((p) => Number(p.costSol) > 0)
+        .map((p) => ({
+          t: p.t,
+          indexed: (Number(p.valueSol) / Number(p.costSol)) * 100,
+        }))
     }
     return aggQ.data?.data?.points ?? []
   }, [vaultPnlEndpoint, vaultPnlQ.data, aggQ.data, activeTier])
