@@ -52,13 +52,14 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
   }
 
   const mints = raw.map((t) => t.mint)
-  // Fire all three price sources in parallel; Bags per-mint probe still
-  // needs the decimals (we already have them from Helius).
+  // Fire price sources in parallel. Include SOL_MINT in DexScreener batch
+  // so we have a fallback if Jupiter doesn't return a SOL/USD price.
   const [dexPrices, jupPrices] = await Promise.all([
-    getDexVolumes(mints),
+    getDexVolumes([...mints, SOL_MINT]),
     getJupiterPrices([...mints, SOL_MINT]),
   ])
-  const solUsd = Number(jupPrices.get(SOL_MINT)?.usdPrice ?? 0)
+  let solUsd = Number(jupPrices.get(SOL_MINT)?.usdPrice ?? 0)
+  if (solUsd <= 0) solUsd = Number(dexPrices.get(SOL_MINT)?.priceUsd ?? 0)
 
   const holdings: LiveHolding[] = []
   for (const t of raw) {
