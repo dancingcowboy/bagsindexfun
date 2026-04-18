@@ -651,6 +651,7 @@ async function processSingleTier(
         data: {
           cycleId: cycle.id,
           riskTier: tier,
+          source: 'BAGS',
           tokenMint: t.tokenMint,
           tokenSymbol: t.tokenSymbol,
           tokenName: t.tokenName,
@@ -676,6 +677,7 @@ async function processSingleTier(
         data: {
           cycleId: cycle.id,
           riskTier: tier,
+          source: 'BAGS',
           tokenMint: t.tokenMint,
           tokenSymbol: t.tokenSymbol,
           tokenName: t.tokenName,

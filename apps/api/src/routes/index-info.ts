@@ -471,7 +471,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
           orderBy: { completedAt: 'desc' },
           include: {
             scores: {
-              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 }, source: 'BAGS' },
+              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
               orderBy: { rank: 'asc' },
               select: { tokenMint: true, tokenSymbol: true, tokenName: true },
             },
@@ -483,7 +483,7 @@ export async function indexInfoRoutes(app: FastifyInstance) {
             orderBy: { completedAt: 'desc' },
             include: {
               scores: {
-                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 }, source: 'BAGS' },
+                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
                 orderBy: { rank: 'asc' },
                 select: { tokenMint: true, tokenSymbol: true, tokenName: true },
               },

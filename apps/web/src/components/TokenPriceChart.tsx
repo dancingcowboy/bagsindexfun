@@ -85,7 +85,7 @@ export function TokenPriceChart({
   subtitle = 'Hourly prices · normalized to 100 at range start',
   aggregateTier,
   tierSelectable = false,
-  initialTier = 'BALANCED',
+  initialTier = 'CONSERVATIVE',
   aggregateEndpoint = '/index/aggregate-history',
   vaultPnlEndpoint,
 }: Props = {}) {
