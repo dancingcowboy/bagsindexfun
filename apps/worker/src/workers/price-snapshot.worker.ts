@@ -106,26 +106,31 @@ export async function processSnapshot(_job?: Job) {
     const uniqueMints = new Set<string>()
     for (const w of activeWallets) for (const h of w.holdings) uniqueMints.add(h.tokenMint)
 
-    // Also sample every token that has been in a tier top-10 during the last
-    // 14 days. This (a) pre-populates the landing-page chart for tiers with
-    // no live users yet, and (b) keeps individual lines from cutting off
-    // mid-chart when a token gets rotated out of the index — they keep
-    // streaming for a 14d tail window so the constituent lines stay visible.
+    // 14-day tail: keeps tokens visible after they rotate out of the index.
     const tailStart = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
     const recentScores = await db.tokenScore.findMany({
       where: {
         isBlacklisted: false,
         rank: { gte: 1, lte: 10 },
         scoredAt: { gte: tailStart },
-        // Include BAGS (vault universe) and DEXSCREENER (admin chart
-        // universe). Without DEXSCREENER, the /admin/dex chart has no
-        // hourly data for its top-10 unless a vault happens to hold
-        // those tokens.
         source: { in: ['BAGS', 'DEXSCREENER'] },
       },
       select: { tokenMint: true },
     })
     for (const s of recentScores) uniqueMints.add(s.tokenMint)
+
+    // Always sample the last KNOWN GOOD cycle per tier, regardless of age.
+    // If empty cycles run for >14 days the tail window above would drop those
+    // tokens, breaking the chart for the cycle the API falls back to.
+    const scoreFilter = { isBlacklisted: false, rank: { gte: 1, lte: 10 } }
+    for (const tier of ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const) {
+      const lastGoodCycle = await db.scoringCycle.findFirst({
+        where: { status: 'COMPLETED', source: 'BAGS', tier, scores: { some: scoreFilter } },
+        orderBy: { completedAt: 'desc' },
+        include: { scores: { where: scoreFilter, select: { tokenMint: true } } },
+      })
+      if (lastGoodCycle) for (const s of lastGoodCycle.scores) uniqueMints.add(s.tokenMint)
+    }
 
     // Always sample the platform token ($BAGSX) — every vault holds 10%
     // exposure to it, so the chart needs a continuous price series.
