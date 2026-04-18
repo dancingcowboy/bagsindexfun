@@ -138,16 +138,11 @@ export async function processSnapshot(_job?: Job) {
 
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {
-      const decimals = await getMintDecimalsBatch(mintList)
-
-      // Price sources: Bags router (Bags tokens), then DexScreener (everything
-      // else). Jupiter dropped — 429 rate limits were blocking all non-Bags
-      // pricing because SOL/USD came from Jupiter.
-      // SOL/USD from DexScreener — single dedicated fetch so it never blocks.
+      // Fetch DexScreener prices first — no Helius RPC, never 429s.
+      // priceNative is direct SOL price; no solUsd needed.
       const dexPrices = await getDexVolumes([...mintList, SOL_MINT])
       let solUsd = Number(dexPrices.get(SOL_MINT)?.priceUsd ?? 0)
       if (solUsd <= 0) {
-        // Dedicated SOL lookup via DexScreener pairs endpoint
         try {
           const solRes = await fetch(
             'https://api.dexscreener.com/tokens/v1/solana/So11111111111111111111111111111111111111112',
@@ -166,6 +161,15 @@ export async function processSnapshot(_job?: Job) {
       }
       if (solUsd > 0) logger.info(`[price-snapshot] SOL/USD: $${solUsd.toFixed(2)}`)
 
+      // Decimals are only needed for the Bags router probe. Fetch them but
+      // don't let a Helius 429 block DexScreener pricing for everything else.
+      let decimals = new Map<string, number>()
+      try {
+        decimals = await getMintDecimalsBatch(mintList)
+      } catch (err) {
+        logger.error(`[price-snapshot] getMintDecimalsBatch failed (will use DexScreener only): ${err}`)
+      }
+
       let priceWrites = 0
       let bagsHits = 0
       let dexHits = 0
@@ -173,7 +177,7 @@ export async function processSnapshot(_job?: Job) {
         if (mint === SOL_MINT) continue
         let priceSol: number | null = null
 
-        // 1. Bags router (native Bags tokens)
+        // 1. Bags router — most accurate for native Bags tokens
         const dec = decimals.get(mint)
         if (dec !== undefined) {
           const probe = (10n ** BigInt(dec)).toString()
@@ -185,7 +189,16 @@ export async function processSnapshot(_job?: Job) {
           await new Promise((r) => setTimeout(r, 100))
         }
 
-        // 2. DexScreener USD → SOL conversion
+        // 2. DexScreener priceNative (direct SOL, no USD bridge)
+        if (priceSol === null) {
+          const native = dexPrices.get(mint)?.priceNative ?? 0
+          if (native > 0) {
+            priceSol = native
+            dexHits++
+          }
+        }
+
+        // 3. DexScreener priceUsd / solUsd fallback
         if (priceSol === null && solUsd > 0) {
           const usd = Number(dexPrices.get(mint)?.priceUsd ?? 0)
           if (usd > 0) {
