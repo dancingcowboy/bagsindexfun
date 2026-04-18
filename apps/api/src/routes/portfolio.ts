@@ -30,51 +30,46 @@ export async function portfolioRoutes(app: FastifyInstance) {
         return { success: true, data: { totalValueSol: '0', tiers: [] } }
       }
 
-      // Live read from chain + price APIs is now opt-in via ?live=1. The DB
-      // holdings table is kept fresh by post-swap reconcile in every worker,
-      // so the default path is instant and uses zero external API calls. A
-      // "Refresh Holdings" button on the dashboard re-requests with ?live=1.
-      const liveByAddress = new Map<
-        string,
-        Awaited<ReturnType<typeof import('@bags-index/solana').getLiveHoldings>> | null
-      >()
-      // Native SOL per wallet — fetched in the DB-fallback path so the
-      // 12% SOL anchor on CONSERVATIVE (and any un-redeployed sell proceeds)
-      // is not silently excluded from totalValueSol.
+      // Live pricing is opt-in via ?live=1. On that path we re-price the
+      // DB holdings (kept fresh by post-swap reconcile) using DexScreener
+      // priceNative — no Helius or Jupiter calls. The default path reads
+      // valueSolEst straight from the DB (refreshed hourly by the snapshot
+      // worker). Native SOL always comes from the chain; we try Helius RPC
+      // and fall back to public RPC inside getNativeSolBalance.
+      const priceByMint = new Map<string, { valueSol: number; priceSol: number; source: string }>()
       const nativeSolByAddress = new Map<string, number>()
       if (wantsLive) {
-        const { getLiveHoldings } = await import('@bags-index/solana')
-        await Promise.all(
-          wallets.map(async (w) => {
-            try {
-              liveByAddress.set(w.address, await getLiveHoldings(w.address))
-            } catch (err) {
-              app.log.warn({ err, wallet: w.address }, '[portfolio] live fetch failed')
-              liveByAddress.set(w.address, null)
-            }
-          }),
+        const { priceHoldingsFromDex } = await import('@bags-index/solana')
+        const allHoldings = wallets.flatMap((w) =>
+          w.holdings.map((h) => ({
+            tokenMint: h.tokenMint,
+            amount: h.amount,
+            decimals: h.decimals,
+          })),
         )
-      } else {
-        const { getNativeSolBalance } = await import('@bags-index/solana')
-        await Promise.all(
-          wallets.map(async (w) => {
-            try {
-              nativeSolByAddress.set(w.address, await getNativeSolBalance(w.address))
-            } catch (err) {
-              app.log.warn({ err, wallet: w.address }, '[portfolio] native SOL fetch failed')
-              nativeSolByAddress.set(w.address, 0)
-            }
-          }),
-        )
+        try {
+          const priced = await priceHoldingsFromDex(allHoldings)
+          for (const [mint, p] of priced) priceByMint.set(mint, p)
+        } catch (err) {
+          app.log.warn({ err }, '[portfolio] DexScreener re-pricing failed')
+        }
       }
+      const { getNativeSolBalance } = await import('@bags-index/solana')
+      await Promise.all(
+        wallets.map(async (w) => {
+          try {
+            nativeSolByAddress.set(w.address, await getNativeSolBalance(w.address))
+          } catch (err) {
+            app.log.warn({ err, wallet: w.address }, '[portfolio] native SOL fetch failed')
+            nativeSolByAddress.set(w.address, 0)
+          }
+        }),
+      )
 
       // Pull token symbol/name from recent TokenScore rows so the UI has
-      // labels for every mint we display (live or DB).
+      // labels for every mint we display.
       const mints = new Set<string>()
       for (const w of wallets) for (const h of w.holdings) mints.add(h.tokenMint)
-      for (const live of liveByAddress.values()) {
-        if (live) for (const h of live.holdings) mints.add(h.tokenMint)
-      }
       const scores = mints.size
         ? await db.tokenScore.findMany({
             where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
@@ -88,63 +83,38 @@ export async function portfolioRoutes(app: FastifyInstance) {
           metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, name: s.tokenName, marketCapUsd: Number(s.marketCapUsd) })
       }
 
-      const tiers = wallets.map((w) => {
-        const live = liveByAddress.get(w.address)
-        if (live) {
-          const tokenValueSol = live.holdings.reduce((s, h) => s + h.valueSol, 0)
-          // Only include native SOL when the wallet holds tokens — the gas
-          // reserve in an empty wallet is not user value.
-          const totalValueSol = live.holdings.length > 0
-            ? tokenValueSol + live.nativeSol
-            : 0
-          return {
-            riskTier: w.riskTier,
-            walletAddress: w.address,
-            totalValueSol: totalValueSol.toFixed(9),
-            nativeSol: live.holdings.length > 0 ? live.nativeSol.toFixed(9) : '0',
-            holdings: live.holdings.map((h) => {
-              const meta = metaByMint.get(h.tokenMint)
-              return {
-                tokenMint: h.tokenMint,
-                tokenSymbol: meta?.symbol ?? null,
-                tokenName: meta?.name ?? null,
-                amount: h.amount,
-                valueSol: h.valueSol.toFixed(9),
-                priceSource: h.source,
-                marketCapUsd: meta?.marketCapUsd ?? 0,
-                allocationPct:
-                  tokenValueSol > 0
-                    ? ((h.valueSol / tokenValueSol) * 100).toFixed(2)
-                    : '0',
-              }
-            }),
-          }
+      // Each DB holding's valueSol comes from either the live DexScreener
+      // re-price (when ?live=1) or the worker-maintained `valueSolEst`.
+      const resolveValueSol = (h: (typeof wallets)[number]['holdings'][number]): number => {
+        if (wantsLive) {
+          const p = priceByMint.get(h.tokenMint)
+          if (p && p.source !== 'none') return p.valueSol
         }
+        return Number(h.valueSolEst)
+      }
 
-        // Fallback to DB if live read failed.
-        const tokenValueSol = w.holdings.reduce((s, h) => s + Number(h.valueSolEst), 0)
-        // Include native SOL (fetched above for the non-live path, or zero if
-        // the balance read failed). Only count it when the wallet holds tokens
-        // — an empty wallet's gas reserve is not user value.
+      const tiers = wallets.map((w) => {
         const nativeSol = w.holdings.length > 0 ? (nativeSolByAddress.get(w.address) ?? 0) : 0
+        const holdingVals = w.holdings.map((h) => ({ h, v: resolveValueSol(h) }))
+        const tokenValueSol = holdingVals.reduce((s, x) => s + x.v, 0)
         return {
           riskTier: w.riskTier,
           walletAddress: w.address,
           totalValueSol: (tokenValueSol + nativeSol).toFixed(9),
           nativeSol: nativeSol.toFixed(9),
-          holdings: w.holdings.map((h) => {
+          holdings: holdingVals.map(({ h, v }) => {
             const meta = metaByMint.get(h.tokenMint)
+            const priced = wantsLive ? priceByMint.get(h.tokenMint) : undefined
             return {
               tokenMint: h.tokenMint,
               tokenSymbol: meta?.symbol ?? null,
               tokenName: meta?.name ?? null,
               amount: h.amount.toString(),
-              valueSol: Number(h.valueSolEst).toFixed(9),
+              valueSol: v.toFixed(9),
+              priceSource: priced?.source ?? 'db',
               marketCapUsd: meta?.marketCapUsd ?? 0,
               allocationPct:
-                tokenValueSol > 0
-                  ? ((Number(h.valueSolEst) / tokenValueSol) * 100).toFixed(2)
-                  : '0',
+                tokenValueSol > 0 ? ((v / tokenValueSol) * 100).toFixed(2) : '0',
             }
           }),
         }
@@ -300,17 +270,22 @@ export async function portfolioRoutes(app: FastifyInstance) {
       // sizeable positions. Pricing in the request path (a few hundred ms)
       // guarantees the worker sees non-zero totalValueSol and actually swaps.
       try {
-        const { getLiveHoldings } = await import('@bags-index/solana')
-        const live = await getLiveHoldings(wallet.address)
-        const byMint = new Map(live.holdings.map((h) => [h.tokenMint, h.valueSol]))
+        const { priceHoldingsFromDex } = await import('@bags-index/solana')
         const dbHoldings = await db.holding.findMany({
           where: { subWalletId: wallet.id },
         })
+        const priced = await priceHoldingsFromDex(
+          dbHoldings.map((h) => ({
+            tokenMint: h.tokenMint,
+            amount: h.amount,
+            decimals: h.decimals,
+          })),
+        )
         await Promise.all(
           dbHoldings.map((h) =>
             db.holding.update({
               where: { id: h.id },
-              data: { valueSolEst: (byMint.get(h.tokenMint) ?? 0).toFixed(9) },
+              data: { valueSolEst: (priced.get(h.tokenMint)?.valueSol ?? 0).toFixed(9) },
             }),
           ),
         )
@@ -563,17 +538,38 @@ export async function portfolioRoutes(app: FastifyInstance) {
       // Live value per wallet (token value + native SOL). Falls back to the
       // DB snapshot when the Helius/price fetch fails so the PnL card never
       // goes blank on a transient RPC hiccup.
-      const { getLiveHoldings } = await import('@bags-index/solana')
+      // Live re-price via DexScreener + native SOL via RPC-with-fallback.
+      // No Helius /balances calls — we trust DB amounts (post-swap reconcile
+      // keeps them fresh) and only ask DexScreener for live prices.
+      const { priceHoldingsFromDex, getNativeSolBalance } = await import('@bags-index/solana')
       const liveByWallet = new Map<string, number>()
+      const allHoldings = wallets.flatMap((w) =>
+        w.holdings.map((h) => ({
+          tokenMint: h.tokenMint,
+          amount: h.amount,
+          decimals: h.decimals,
+        })),
+      )
+      let pricedMap = new Map<string, { valueSol: number; source: string }>()
+      try {
+        const priced = await priceHoldingsFromDex(allHoldings)
+        for (const [m, p] of priced) pricedMap.set(m, { valueSol: p.valueSol, source: p.source })
+      } catch (err) {
+        app.log.warn({ err }, '[pnl] DexScreener re-pricing failed')
+      }
       await Promise.all(
         wallets.map(async (w) => {
+          const tokenValue = w.holdings.reduce((s, h) => {
+            const p = pricedMap.get(h.tokenMint)
+            return s + (p && p.source !== 'none' ? p.valueSol : Number(h.valueSolEst))
+          }, 0)
+          let nativeSol = 0
           try {
-            const live = await getLiveHoldings(w.address)
-            const tokenValue = live.holdings.reduce((s, h) => s + h.valueSol, 0)
-            liveByWallet.set(w.id, tokenValue + live.nativeSol)
+            nativeSol = await getNativeSolBalance(w.address)
           } catch (err) {
-            app.log.warn({ err, wallet: w.address }, '[pnl] live fetch failed')
+            app.log.warn({ err, wallet: w.address }, '[pnl] native SOL fetch failed')
           }
+          liveByWallet.set(w.id, tokenValue + nativeSol)
         }),
       )
 

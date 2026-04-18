@@ -32,14 +32,14 @@ export async function reconcileSubWalletHoldings(
   const chain = (await getTokenBalances(walletAddress)) as {
     tokens?: Array<{ mint: string; amount: number | string; decimals: number }>
   }
-  const onChain = new Map<string, bigint>()
+  const onChain = new Map<string, { amount: bigint; decimals: number }>()
   for (const t of chain.tokens ?? []) {
     if (t.mint === SOL_MINT) continue
     const raw =
       typeof t.amount === 'string'
         ? BigInt(t.amount)
         : BigInt(Math.floor(Number(t.amount) || 0))
-    if (raw > 0n) onChain.set(t.mint, raw)
+    if (raw > 0n) onChain.set(t.mint, { amount: raw, decimals: t.decimals })
   }
 
   const holdings = await db.holding.findMany({ where: { subWalletId } })
@@ -52,13 +52,14 @@ export async function reconcileSubWalletHoldings(
   const now = Date.now()
 
   for (const h of holdings) {
-    const onChainAmt = onChain.get(h.tokenMint)
-    if (onChainAmt !== undefined) {
-      // Token exists on-chain — update amount if different
-      if (onChainAmt !== h.amount) {
+    const onChainEntry = onChain.get(h.tokenMint)
+    if (onChainEntry !== undefined) {
+      const { amount: onChainAmt, decimals: onChainDec } = onChainEntry
+      // Token exists on-chain — update amount and decimals if different
+      if (onChainAmt !== h.amount || onChainDec !== h.decimals) {
         await db.holding.update({
           where: { id: h.id },
-          data: { amount: onChainAmt },
+          data: { amount: onChainAmt, decimals: onChainDec },
         })
         updated++
       }
@@ -72,13 +73,14 @@ export async function reconcileSubWalletHoldings(
     }
   }
 
-  for (const [mint, amt] of onChain) {
+  for (const [mint, { amount: amt, decimals: dec }] of onChain) {
     if (dbByMint.has(mint)) continue
     await db.holding.create({
       data: {
         subWalletId,
         tokenMint: mint,
         amount: amt,
+        decimals: dec,
         valueSolEst: '0',
         costBasisSol: '0',
       },

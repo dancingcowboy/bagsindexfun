@@ -1,13 +1,12 @@
 import { Worker, type Job } from 'bullmq'
 import { db } from '@bags-index/db'
 import {
-  getBagsSolValue,
-  getMintDecimalsBatch,
   getDexVolumes,
-  getLiveHoldings,
+  priceHoldingsFromDex,
+  getNativeSolBalance,
 } from '@bags-index/solana'
 import { SOL_MINT, BAGSX_MINT } from '@bags-index/shared'
-import { QUEUE_PRICE_SNAPSHOT, LAMPORTS_PER_SOL } from '@bags-index/shared'
+import { QUEUE_PRICE_SNAPSHOT } from '@bags-index/shared'
 import { redis } from '../queue/redis.js'
 
 /**
@@ -42,46 +41,49 @@ export async function processSnapshot(_job?: Job) {
     let realizedSol = Number(wallet.realizedPnlSol ?? 0)
     let totalValueSol = 0
 
-    // Use live read-through so every holding picks up the Bags → Dex →
-    // Jupiter fallback. Previously we called Bags directly per holding,
-    // which silently returned null for tokens with no Bags route and
-    // left `valueSolEst` stale, understating the vault's real value.
-    let live: Awaited<ReturnType<typeof getLiveHoldings>> | null = null
-    try {
-      live = await getLiveHoldings(wallet.address)
-    } catch (err) {
-      logger.error(`[price-snapshot] live-read failed for ${wallet.address.slice(0, 8)}: ${err}`)
-    }
-
-    const liveByMint = new Map<string, number>()
-    if (live) for (const h of live.holdings) liveByMint.set(h.tokenMint, h.valueSol)
+    // Re-price DB holdings via DexScreener only (no Helius /balances).
+    // Post-swap reconcile is the single source of truth for amounts and
+    // decimals; we only fetch live prices here.
+    const priced = await priceHoldingsFromDex(
+      wallet.holdings.map((h) => ({
+        tokenMint: h.tokenMint,
+        amount: h.amount,
+        decimals: h.decimals,
+      })),
+    ).catch((err) => {
+      logger.error(`[price-snapshot] DexScreener re-price failed for ${wallet.address.slice(0, 8)}: ${err}`)
+      return new Map<string, { valueSol: number; source: string }>() as any
+    })
 
     for (const h of wallet.holdings) {
       const amount = h.amount?.toString() ?? '0'
       if (amount === '0') continue
 
-      const liveVal = liveByMint.get(h.tokenMint)
-      if (liveVal === undefined) {
+      const p = priced.get(h.tokenMint)
+      if (!p || p.source === 'none') {
         mintsMissing++
         // Preserve prior DB value rather than zeroing it
         totalValueSol += Number(h.valueSolEst ?? 0)
         continue
       }
 
-      totalValueSol += liveVal
+      totalValueSol += p.valueSol
       await db.holding.update({
         where: { id: h.id },
-        data: { valueSolEst: liveVal.toFixed(9) },
+        data: { valueSolEst: p.valueSol.toFixed(9) },
       })
       updatedHoldings++
     }
 
     // Native SOL sitting in the sub-wallet is real user value (the 12% SOL
     // anchor on CONSERVATIVE, plus any sell proceeds not yet redeployed).
-    // Without this, the PnlSnapshot history understates vault value and
-    // every dashboard chart reads low.
-    if (live && wallet.holdings.length > 0) {
-      totalValueSol += live.nativeSol
+    // getNativeSolBalance uses Helius RPC with public-RPC fallback.
+    if (wallet.holdings.length > 0) {
+      try {
+        totalValueSol += await getNativeSolBalance(wallet.address)
+      } catch (err) {
+        logger.error(`[price-snapshot] native SOL fetch failed for ${wallet.address.slice(0, 8)}: ${err}`)
+      }
     }
 
     const unrealizedSol = totalValueSol - totalCostSol
@@ -138,68 +140,24 @@ export async function processSnapshot(_job?: Job) {
 
     const mintList = [...uniqueMints]
     if (mintList.length > 0) {
-      // Fetch DexScreener prices first — no Helius RPC, never 429s.
-      // priceNative is direct SOL price; no solUsd needed.
+      // DexScreener-only pricing: priceNative is direct SOL/token, no
+      // Bags router probe and no Helius decimals fetch. Avoids burning
+      // Helius credits on the hourly price path.
       const dexPrices = await getDexVolumes([...mintList, SOL_MINT])
-      let solUsd = Number(dexPrices.get(SOL_MINT)?.priceUsd ?? 0)
-      if (solUsd <= 0) {
-        try {
-          const solRes = await fetch(
-            'https://api.dexscreener.com/tokens/v1/solana/So11111111111111111111111111111111111111112',
-            { signal: AbortSignal.timeout(10_000) },
-          )
-          const solData = await solRes.json() as any
-          const pairs: any[] = Array.isArray(solData) ? solData : solData?.pairs ?? []
-          if (pairs.length > 0) {
-            const best = pairs.reduce((a: any, p: any) =>
-              (Number(p?.liquidity?.usd) || 0) > (Number(a?.liquidity?.usd) || 0) ? p : a,
-              pairs[0],
-            )
-            solUsd = Number(best?.priceUsd) || 0
-          }
-        } catch { /* will skip USD-denominated pricing this cycle */ }
-      }
+      const solUsd = Number(dexPrices.get(SOL_MINT)?.priceUsd ?? 0)
       if (solUsd > 0) logger.info(`[price-snapshot] SOL/USD: $${solUsd.toFixed(2)}`)
 
-      // Decimals are only needed for the Bags router probe. Fetch them but
-      // don't let a Helius 429 block DexScreener pricing for everything else.
-      let decimals = new Map<string, number>()
-      try {
-        decimals = await getMintDecimalsBatch(mintList)
-      } catch (err) {
-        logger.error(`[price-snapshot] getMintDecimalsBatch failed (will use DexScreener only): ${err}`)
-      }
-
       let priceWrites = 0
-      let bagsHits = 0
       let dexHits = 0
       for (const mint of mintList) {
         if (mint === SOL_MINT) continue
         let priceSol: number | null = null
 
-        // 1. Bags router — most accurate for native Bags tokens
-        const dec = decimals.get(mint)
-        if (dec !== undefined) {
-          const probe = (10n ** BigInt(dec)).toString()
-          const lamports = await getBagsSolValue(mint, probe)
-          if (lamports !== null) {
-            priceSol = Number(lamports) / LAMPORTS_PER_SOL
-            bagsHits++
-          }
-          await new Promise((r) => setTimeout(r, 100))
-        }
-
-        // 2. DexScreener priceNative (direct SOL, no USD bridge)
-        if (priceSol === null) {
-          const native = dexPrices.get(mint)?.priceNative ?? 0
-          if (native > 0) {
-            priceSol = native
-            dexHits++
-          }
-        }
-
-        // 3. DexScreener priceUsd / solUsd fallback
-        if (priceSol === null && solUsd > 0) {
+        const native = dexPrices.get(mint)?.priceNative ?? 0
+        if (native > 0) {
+          priceSol = native
+          dexHits++
+        } else if (solUsd > 0) {
           const usd = Number(dexPrices.get(mint)?.priceUsd ?? 0)
           if (usd > 0) {
             priceSol = usd / solUsd
@@ -214,9 +172,7 @@ export async function processSnapshot(_job?: Job) {
         })
         priceWrites++
       }
-      logger.info(
-        `[price-snapshot] wrote ${priceWrites} token price samples (bags=${bagsHits} dex=${dexHits})`,
-      )
+      logger.info(`[price-snapshot] wrote ${priceWrites} token price samples (dex=${dexHits})`)
 
       // Refresh marketCapUsd on the latest TokenScore for each mint so
       // the dashboard/landing page always show current MC — not just

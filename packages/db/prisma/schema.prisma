@@ -64,6 +64,7 @@ model Holding {
   subWalletId     String    @map("sub_wallet_id")
   tokenMint       String    @map("token_mint")
   amount          BigInt
+  decimals        Int       @default(9)
   valueSolEst     Decimal   @map("value_sol_est") @db.Decimal(20, 9)
   costBasisSol    Decimal   @default(0) @map("cost_basis_sol") @db.Decimal(20, 9)
   totalBoughtSol  Decimal   @default(0) @map("total_bought_sol") @db.Decimal(20, 9)
