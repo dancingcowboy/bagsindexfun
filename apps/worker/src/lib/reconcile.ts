@@ -55,7 +55,18 @@ export async function reconcileSubWalletHoldings(
     const onChainEntry = onChain.get(h.tokenMint)
     if (onChainEntry !== undefined) {
       const { amount: onChainAmt, decimals: onChainDec } = onChainEntry
-      // Token exists on-chain — update amount and decimals if different
+      // Token exists on-chain — update amount and decimals if different.
+      // Within the grace period, skip amount *shrinks* so Helius indexer
+      // lag doesn't roll back a just-recorded buy (see CLANKER 2026-04-18
+      // — post-buy DB=25.4T, Helius still at 19.3T, reconcile regressed
+      // the row, next rebalance sold only 19.3T of a 25.4T position).
+      const age = now - new Date(h.updatedAt).getTime()
+      const withinGrace = age <= DELETE_GRACE_MS
+      const chainShrinks = onChainAmt < h.amount
+      if (withinGrace && chainShrinks) {
+        // Skip entirely — trust our recent swap-path increment.
+        continue
+      }
       if (onChainAmt !== h.amount || onChainDec !== h.decimals) {
         await db.holding.update({
           where: { id: h.id },
@@ -65,8 +76,8 @@ export async function reconcileSubWalletHoldings(
       }
     } else {
       // Token not on-chain — delete if old enough (past grace period)
-      const age = now - new Date(h.updatedAt).getTime()
-      if (age > DELETE_GRACE_MS) {
+      const rowAge = now - new Date(h.updatedAt).getTime()
+      if (rowAge > DELETE_GRACE_MS) {
         await db.holding.delete({ where: { id: h.id } })
         deleted++
       }
