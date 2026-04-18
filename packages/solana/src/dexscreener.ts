@@ -3,6 +3,7 @@ import axios from 'axios'
 export interface DexVolume {
   volumeH24Usd: number
   priceUsd: number
+  priceNative: number // price in SOL (quote token of the deepest pair)
   liquidityUsd: number
   marketCapUsd: number
   pairCreatedAt: number | null // epoch ms
@@ -40,6 +41,7 @@ export async function getDexVolumes(
         out.set(mint, {
           volumeH24Usd: Number(p?.volume?.h24) || 0,
           priceUsd: Number(p?.priceUsd) || 0,
+          priceNative: Number(p?.priceNative) || 0,
           liquidityUsd: Number(p?.liquidity?.usd) || 0,
           marketCapUsd: Number(p?.marketCap) || Number(p?.fdv) || 0,
           pairCreatedAt: p?.pairCreatedAt ? Number(p.pairCreatedAt) : null,

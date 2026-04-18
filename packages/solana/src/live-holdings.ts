@@ -52,8 +52,8 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
   }
 
   const mints = raw.map((t) => t.mint)
-  // Fire price sources in parallel. Include SOL_MINT in DexScreener batch
-  // so we have a fallback if Jupiter doesn't return a SOL/USD price.
+  // Fire price sources in parallel. DexScreener priceNative is direct SOL
+  // price — no USD→SOL conversion needed, immune to Jupiter SOL/USD failures.
   const [dexPrices, jupPrices] = await Promise.all([
     getDexVolumes([...mints, SOL_MINT]),
     getJupiterPrices([...mints, SOL_MINT]),
@@ -68,20 +68,21 @@ export async function getLiveHoldings(walletAddress: string): Promise<LiveHoldin
     const decimals = t.decimals
     const whole = Number(amountBig) / 10 ** decimals
 
-    // Price cascade: DexScreener batch → Jupiter batch. Both are already
-    // fetched once above, so this loop issues zero network calls.
+    // Price cascade:
+    // 1. DexScreener priceNative (SOL directly — no USD bridge needed)
+    // 2. DexScreener priceUsd / solUsd
+    // 3. Jupiter priceUsd / solUsd
     let priceSol = 0
     let source: LiveHolding['source'] = 'none'
 
-    if (solUsd > 0) {
-      const dexUsd = Number(dexPrices.get(t.mint)?.priceUsd ?? 0)
-      if (dexUsd > 0) {
-        priceSol = dexUsd / solUsd
-        source = 'dex'
-      }
-    }
-
-    if (priceSol === 0 && solUsd > 0) {
+    const dex = dexPrices.get(t.mint)
+    if ((dex?.priceNative ?? 0) > 0) {
+      priceSol = dex!.priceNative
+      source = 'dex'
+    } else if (solUsd > 0 && (dex?.priceUsd ?? 0) > 0) {
+      priceSol = dex!.priceUsd / solUsd
+      source = 'dex'
+    } else if (solUsd > 0) {
       const jupUsd = Number(jupPrices.get(t.mint)?.usdPrice ?? 0)
       if (jupUsd > 0) {
         priceSol = jupUsd / solUsd
