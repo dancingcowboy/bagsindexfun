@@ -67,12 +67,18 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         tierParam && (allowed as readonly string[]).includes(tierParam)
           ? (tierParam as (typeof allowed)[number])
           : undefined
+      const scoreWhere = { isBlacklisted: false, rank: { gte: 1, lte: 10 }, ...(tierFilter ? { riskTier: tierFilter } : {}) }
       const latestCycle = await db.scoringCycle.findFirst({
-        where: { status: 'COMPLETED', source: 'BAGS', ...(tierFilter ? { tier: tierFilter } : {}) },
+        where: {
+          status: 'COMPLETED',
+          source: 'BAGS',
+          ...(tierFilter ? { tier: tierFilter } : {}),
+          scores: { some: scoreWhere },
+        },
         orderBy: { completedAt: 'desc' },
         include: {
           scores: {
-            where: { isBlacklisted: false, source: 'BAGS', ...(tierFilter ? { riskTier: tierFilter } : {}) },
+            where: scoreWhere,
             orderBy: { rank: 'asc' },
             take: 10,
           },
@@ -556,14 +562,19 @@ export async function indexInfoRoutes(app: FastifyInstance) {
       const results = await Promise.all(
         filterTiers.map(async (tier) => {
           const cycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', tier, source: 'BAGS' },
+            where: {
+              status: 'COMPLETED',
+              tier,
+              source: 'BAGS',
+              scores: { some: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } } },
+            },
             orderBy: { completedAt: 'desc' },
             select: { id: true, completedAt: true },
           })
           if (!cycle) return { tier, scoredAt: null, tokens: [] }
 
           const scores = await db.tokenScore.findMany({
-            where: { cycleId: cycle.id, riskTier: tier, source: 'BAGS' },
+            where: { cycleId: cycle.id, riskTier: tier },
             orderBy: [{ rank: 'asc' }],
           })
           return {
