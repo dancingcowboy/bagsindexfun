@@ -91,8 +91,13 @@ export async function getTokenBalances(walletAddress: string) {
   const apiKey = getApiKey()
   const res = await axios.get(
     `https://api.helius.xyz/v0/addresses/${walletAddress}/balances?api-key=${apiKey}`,
-    { timeout: 15_000 }
+    {
+      timeout: 15_000,
+      validateStatus: (s) => s < 500,
+    }
   )
+  if (res.status === 429) throw Object.assign(new Error('Helius rate limit (429)'), { status: 429 })
+  if (res.status >= 400) throw Object.assign(new Error(`Helius error ${res.status}`), { status: res.status })
   return res.data
 }
 
