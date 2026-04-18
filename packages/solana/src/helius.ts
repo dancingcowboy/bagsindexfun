@@ -1,4 +1,34 @@
 import axios from 'axios'
+import { Connection, PublicKey } from '@solana/web3.js'
+
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+let publicRpcConn: Connection | null = null
+function getPublicRpcConnection(): Connection {
+  if (!publicRpcConn) {
+    const url = process.env.PUBLIC_RPC_URL || 'https://solana-rpc.publicnode.com'
+    publicRpcConn = new Connection(url, 'confirmed')
+  }
+  return publicRpcConn
+}
+
+async function getTokenBalancesPublicRpc(walletAddress: string) {
+  const conn = getPublicRpcConnection()
+  const owner = new PublicKey(walletAddress)
+  const [v1, v2] = await Promise.all([
+    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+    conn.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }).catch(() => ({ value: [] as any[] })),
+  ])
+  const tokens = [...v1.value, ...v2.value].map((a: any) => {
+    const info = a.account.data.parsed.info
+    return {
+      mint: info.mint as string,
+      amount: String(info.tokenAmount?.amount ?? '0'),
+      decimals: Number(info.tokenAmount?.decimals ?? 0),
+    }
+  })
+  return { tokens }
+}
 
 function getApiKey(): string {
   const key = process.env.HELIUS_API_KEY
@@ -85,7 +115,12 @@ export async function getTokenMetadataBatch(tokenMints: string[]) {
 }
 
 /**
- * Get token balances for a wallet via Helius enhanced API.
+ * Get token balances for a wallet.
+ *
+ * Primary: Helius enhanced `/balances` endpoint (one call, includes mint +
+ * amount + decimals). Fallback: public Solana RPC `getParsedTokenAccountsByOwner`
+ * when Helius 429s (key exhausted or throttled). The public RPC call returns
+ * the same shape we need so the caller is unaware of the source.
  */
 export async function getTokenBalances(walletAddress: string) {
   const apiKey = getApiKey()
@@ -96,7 +131,9 @@ export async function getTokenBalances(walletAddress: string) {
       validateStatus: (s) => s < 500,
     }
   )
-  if (res.status === 429) throw Object.assign(new Error('Helius rate limit (429)'), { status: 429 })
+  if (res.status === 429) {
+    return await getTokenBalancesPublicRpc(walletAddress)
+  }
   if (res.status >= 400) throw Object.assign(new Error(`Helius error ${res.status}`), { status: res.status })
   return res.data
 }

@@ -1,6 +1,7 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 
 let connection: Connection | null = null
+let publicConnection: Connection | null = null
 
 export function getConnection(): Connection {
   if (!connection) {
@@ -11,17 +12,35 @@ export function getConnection(): Connection {
   return connection
 }
 
+function getPublicConnection(): Connection {
+  if (!publicConnection) {
+    const url = process.env.PUBLIC_RPC_URL || 'https://solana-rpc.publicnode.com'
+    publicConnection = new Connection(url, 'confirmed')
+  }
+  return publicConnection
+}
+
+// Try Helius first; if it fails (429/timeout), fall back to public RPC so
+// dashboard refreshes don't get stuck when the Helius key is exhausted.
+async function getBalanceLamportsWithFallback(address: string): Promise<number> {
+  try {
+    const conn = getConnection()
+    return await conn.getBalance(new PublicKey(address))
+  } catch (err) {
+    const pub = getPublicConnection()
+    return await pub.getBalance(new PublicKey(address))
+  }
+}
+
 /** Native SOL balance for a wallet address, in SOL (float). */
 export async function getNativeSolBalance(address: string): Promise<number> {
-  const conn = getConnection()
-  const lamports = await conn.getBalance(new PublicKey(address))
+  const lamports = await getBalanceLamportsWithFallback(address)
   return lamports / LAMPORTS_PER_SOL
 }
 
 /** Native SOL balance for a wallet address, in lamports (bigint). */
 export async function getNativeSolBalanceLamports(address: string): Promise<bigint> {
-  const conn = getConnection()
-  const lamports = await conn.getBalance(new PublicKey(address))
+  const lamports = await getBalanceLamportsWithFallback(address)
   return BigInt(lamports)
 }
 
