@@ -24,34 +24,6 @@ export async function depositRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Sub-wallet not initialized' })
       }
 
-      // Beta whitelist gate: only wallets in the whitelist may deposit.
-      // Each entry carries a per-user per-tier deposit cap (default 30 SOL).
-      const user = await db.user.findUnique({ where: { id: userId }, select: { walletAddress: true } })
-      const whitelistEntry = user
-        ? await db.walletWhitelist.findUnique({ where: { walletAddress: user.walletAddress } })
-        : null
-      if (!whitelistEntry) {
-        return reply.status(403).send({ error: 'Wallet not whitelisted for beta access' })
-      }
-
-      // Cap is measured against CURRENT vault value (live holdings), not net
-      // deposited. Vaults may grow organically above the cap via rebalance
-      // gains — that's fine; we only gate additional deposit-driven growth.
-      const vaultCapSol = Number(whitelistEntry.maxDepositSol)
-      if (vaultCapSol > 0) {
-        const holdings = await db.holding.findMany({
-          where: { subWalletId: subWallet.id },
-          select: { valueSolEst: true },
-        })
-        const currentVaultSol = holdings.reduce((sum, h) => sum + Number(h.valueSolEst), 0)
-        if (currentVaultSol + amountSol > vaultCapSol) {
-          const remaining = Math.max(0, vaultCapSol - currentVaultSol)
-          return reply.status(400).send({
-            error: `Vault cap of ${vaultCapSol} SOL reached for ${riskTier} (current size: ${currentVaultSol.toFixed(4)} SOL). You can deposit up to ${remaining.toFixed(4)} SOL more, or contact the admin for an exemption.`,
-          })
-        }
-      }
-
       // No deposit fee — the vault instead holds a fixed 10% BAGSX exposure,
       // bought via the standard allocation + rebalance pipeline.
       const feeSol = 0

@@ -1,9 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 /**
- * Defense-in-depth: gate /dashboard and /admin behind the auth cookie.
- * Without bags_jwt set by /auth/login (which enforces the wallet allowlist),
- * bounce back to the landing page so non-allowlisted users can't poke around.
+ * Gate /dashboard and /admin behind the auth cookie.
+ * Without bags_jwt set by /auth/login, redirect to landing page.
  */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
