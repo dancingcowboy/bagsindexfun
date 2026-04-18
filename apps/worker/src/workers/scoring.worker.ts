@@ -473,15 +473,36 @@ async function processSingleTier(
       .sort((a, b) => a.rank - b.rank)
       .map((s) => s.tokenMint)
 
+    // 3. Disjointness — exclude tokens currently held by the OTHER two tiers'
+    //    latest completed cycles. Each tier's basket stays unique without
+    //    requiring simultaneous scoring runs.
+    const otherTiers = RISK_TIERS.filter((t) => t !== tier)
+    const excludedMints = new Set<string>()
+    for (const ot of otherTiers) {
+      const otherCycle = await db.scoringCycle.findFirst({
+        where: { status: 'COMPLETED', tier: ot, source: 'BAGS' },
+        orderBy: { completedAt: 'desc' },
+        select: { id: true },
+      })
+      if (!otherCycle) continue
+      const otherScores = await db.tokenScore.findMany({
+        where: {
+          cycleId: otherCycle.id,
+          isBlacklisted: false,
+          rank: { gt: 0 },
+        },
+        select: { tokenMint: true },
+      })
+      for (const s of otherScores) excludedMints.add(s.tokenMint)
+    }
+
     const blacklisted = new Set(
       (await db.tokenBlacklist.findMany()).map((b) => b.tokenMint),
     )
 
     // 4. Build raw signals for tradeable tokens
-    // All tiers score the full universe independently — tiers differentiate
-    // via scoring weights and rebalance frequency, not unique token sets.
     const tradeable = survivors
-      .filter((m) => !blacklisted.has(m))
+      .filter((m) => !blacklisted.has(m) && !excludedMints.has(m))
       .map((mint) => ({
         tokenMint: mint,
         symbol: metadata.get(mint)?.symbol ?? mint.slice(0, 6),

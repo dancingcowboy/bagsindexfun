@@ -466,12 +466,16 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         // whichever tier ran last — we must scope the lookup by tier.
         // Fall back to any legacy tier-less cycle if no tier-scoped cycle
         // exists yet.
+        // Find the most recent cycle that actually has rank 1–10 scores.
+        // Empty cycles (bucket=0 after filtering) are skipped so the chart
+        // always shows the last known good basket.
+        const scoreFilter = { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } }
         let cycle = await db.scoringCycle.findFirst({
-          where: { status: 'COMPLETED', tier, source: 'BAGS' },
+          where: { status: 'COMPLETED', tier, source: 'BAGS', scores: { some: scoreFilter } },
           orderBy: { completedAt: 'desc' },
           include: {
             scores: {
-              where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+              where: scoreFilter,
               orderBy: { rank: 'asc' },
               select: { tokenMint: true, tokenSymbol: true, tokenName: true },
             },
@@ -479,11 +483,11 @@ export async function indexInfoRoutes(app: FastifyInstance) {
         })
         if (!cycle) {
           cycle = await db.scoringCycle.findFirst({
-            where: { status: 'COMPLETED', tier: null, source: 'BAGS' },
+            where: { status: 'COMPLETED', tier: null, source: 'BAGS', scores: { some: scoreFilter } },
             orderBy: { completedAt: 'desc' },
             include: {
               scores: {
-                where: { riskTier: tier, isBlacklisted: false, rank: { gte: 1, lte: 10 } },
+                where: scoreFilter,
                 orderBy: { rank: 'asc' },
                 select: { tokenMint: true, tokenSymbol: true, tokenName: true },
               },
