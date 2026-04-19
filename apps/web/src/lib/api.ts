@@ -280,6 +280,7 @@ class ApiClient {
   unlinkTelegram() {
     return this.fetch<{ data: { linked: boolean; enabled: boolean } }>('/user/telegram', {
       method: 'DELETE',
+      body: '{}',
     })
   }
 
