@@ -124,25 +124,19 @@ export async function adminRoutes(app: FastifyInstance) {
         return { success: true, data: { points: [], hours } }
       }
 
-      // Cashflows — only real fee claims (filter via audit log).
+      // Cashflows — only real fee claims (from audit log metadata).
       const claimLogs = await db.auditLog.findMany({
         where: { action: 'VAULT_FEE_CLAIM', createdAt: { gte: since } },
-        select: { resource: true, createdAt: true },
+        select: { metadata: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       })
-      const claimDepositIds = claimLogs
-        .map((l) => (l.resource ?? '').replace(/^deposit:/, ''))
-        .filter(Boolean)
-      const claimDeposits = claimDepositIds.length
-        ? await db.deposit.findMany({
-            where: { id: { in: claimDepositIds }, userId: user.id },
-            select: { amountSol: true, createdAt: true, confirmedAt: true },
-            orderBy: { createdAt: 'asc' },
-          })
-        : []
-      const cashflows = claimDeposits.map((d) => ({
-        t: (d.confirmedAt ?? d.createdAt).getTime(),
-        amount: Number(d.amountSol),
-      }))
+      const cashflows = claimLogs.map((l) => {
+        const meta = (l.metadata as Record<string, unknown>) ?? {}
+        return {
+          t: l.createdAt.getTime(),
+          amount: Number(meta.lamportsClaimed ?? 0) / 1e9,
+        }
+      })
 
       // Chain TWR. Snapshots already include the cashflow in totalValueSol,
       // so subtract any flows that arrived in (prev, cur] before computing
@@ -331,23 +325,25 @@ export async function adminRoutes(app: FastifyInstance) {
       })
       if (!user) return { success: true, data: null }
 
-      // Real fee claims write a VAULT_FEE_CLAIM audit log row pointing at the
-      // resulting Deposit. Use that as the source of truth for "claims" so
-      // manual seed/synthetic deposits don't pollute the dashboard.
+      // Fee claims are tracked via VAULT_FEE_CLAIM audit log entries.
+      // Each entry's metadata carries { lamportsClaimed, perTierSol, distributed }.
       const claimLogs = await db.auditLog.findMany({
         where: { action: 'VAULT_FEE_CLAIM' },
         orderBy: { createdAt: 'desc' },
-        select: { resource: true },
+        select: { id: true, metadata: true, createdAt: true },
       })
-      const claimDepositIds = claimLogs
-        .map((l) => (l.resource ?? '').replace(/^deposit:/, ''))
-        .filter(Boolean)
-      const claimDeposits = claimDepositIds.length
-        ? await db.deposit.findMany({
-            where: { id: { in: claimDepositIds }, userId: user.id },
-            orderBy: { createdAt: 'desc' },
-          })
-        : []
+      const claimDeposits = claimLogs.map((l) => {
+        const meta = (l.metadata as Record<string, unknown>) ?? {}
+        const totalSol = Number(meta.lamportsClaimed ?? 0) / 1e9
+        return {
+          id: l.id,
+          createdAt: l.createdAt,
+          amountSol: totalSol.toFixed(9),
+          positions: meta.positions ?? 0,
+          distributed: meta.distributed ?? 0,
+          perTierSol: meta.perTierSol ?? 0,
+        }
+      })
 
       // Live read-through is opt-in via ?live=1. DB holdings are kept
       // fresh by post-swap reconcile in every worker, so the default
@@ -422,7 +418,7 @@ export async function adminRoutes(app: FastifyInstance) {
       const totalValueSol = live?.totalValueSol ?? tokenValueSol + nativeSol
 
       const totalClaimedSol = claimDeposits.reduce(
-        (s, d) => s + Number(d.amountSol || 0),
+        (s, d) => s + Number(d.amountSol ?? 0),
         0,
       )
 
@@ -486,12 +482,12 @@ export async function adminRoutes(app: FastifyInstance) {
             totalClaimedSol: totalClaimedSol.toFixed(6),
             claimCount: claimDeposits.length,
           },
-          recentClaims: claimDeposits.slice(0, 10).map((d) => ({
+          recentClaims: claimDeposits.slice(0, 20).map((d) => ({
             id: d.id,
-            amountSol: Number(d.amountSol).toFixed(6),
-            feeSol: Number(d.feeSol).toFixed(6),
+            amountSol: d.amountSol,
+            feeSol: '0',
             createdAt: d.createdAt,
-            status: d.status,
+            status: 'CONFIRMED',
           })),
         },
       }
