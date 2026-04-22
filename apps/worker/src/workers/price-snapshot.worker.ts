@@ -166,6 +166,27 @@ export async function processSnapshot(_job?: Job) {
         }
 
         if (priceSol === null) continue
+
+        // Outlier guard: skip if new price is >10x or <0.1x the most recent snapshot.
+        // Prevents bad DexScreener fallback prices on illiquid pools from corrupting valuations.
+        const lastSnap = await db.tokenPriceSnapshot.findFirst({
+          where: { tokenMint: mint },
+          orderBy: { createdAt: 'desc' },
+          select: { priceSol: true },
+        })
+        if (lastSnap) {
+          const prev = Number(lastSnap.priceSol)
+          if (prev > 0) {
+            const ratio = priceSol / prev
+            if (ratio > 10 || ratio < 0.1) {
+              logger.info(
+                `[price-snapshot] outlier skipped ${mint.slice(0, 8)}… — prev=${prev.toFixed(12)} new=${priceSol.toFixed(12)} ratio=${ratio.toFixed(2)}x`,
+              )
+              continue
+            }
+          }
+        }
+
         const mc = dexPrices.get(mint)?.marketCapUsd ?? 0
         await db.tokenPriceSnapshot.create({
           data: { tokenMint: mint, priceSol: priceSol.toFixed(12), marketCapUsd: mc },
