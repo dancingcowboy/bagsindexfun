@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 import { requireAuth } from '../middleware/auth.js'
+import { handleMenuCommand, handleCallback } from '../lib/telegram-menu.js'
+import { answerCallbackQuery } from '../lib/telegram-api.js'
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
 // Support chat + DM-forward destination. Intentionally separate from
@@ -115,6 +117,26 @@ export async function chatRoutes(app: FastifyInstance) {
     }
 
     const body = req.body as any
+
+    // ── Callback queries (inline keyboard taps) ──────────────────
+    const cbq = body?.callback_query
+    if (cbq) {
+      try {
+        const chatId = BigInt(cbq.message?.chat?.id ?? cbq.from?.id ?? 0)
+        const messageId = cbq.message?.message_id as number | undefined
+        const data = cbq.data as string | undefined
+        if (chatId && messageId && data) {
+          await handleCallback(data, chatId, messageId, cbq.id)
+        } else {
+          await answerCallbackQuery(cbq.id)
+        }
+      } catch (err) {
+        app.log.error({ err }, '[chat/webhook] callback_query handler failed')
+        try { await answerCallbackQuery(cbq.id, 'Something went wrong', true) } catch {}
+      }
+      return { ok: true }
+    }
+
     const message = body?.message
     if (!message) return { ok: true }
 
@@ -179,6 +201,19 @@ export async function chatRoutes(app: FastifyInstance) {
           app.log.error({ err }, '[chat/link] code-match branch failed')
           // fall through to the normal forward path on any error
         }
+      }
+    }
+
+    // ── /menu command for linked users ─────────────────────────────
+    if (message.chat?.type === 'private') {
+      const text = String(message.text ?? '').trim()
+      if (/^\/menu$/i.test(text) || /^\/start$/i.test(text)) {
+        try {
+          await handleMenuCommand(BigInt(message.chat.id))
+        } catch (err) {
+          app.log.error({ err }, '[chat/webhook] /menu handler failed')
+        }
+        return { ok: true }
       }
     }
 
