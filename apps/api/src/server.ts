@@ -146,10 +146,13 @@ await app.register(async (scoped) => {
   await scoped.register(solanaRpcRoutes)
 }, { prefix: '/solana/rpc' })
 
-// Chat — webhook is unauthenticated (Telegram calls it) so rate-limit it
+// Chat — webhook is authenticated by secret token header, not IP.
+// Telegram sends bursts (queued updates, retry on error) from a few IPs,
+// so the per-IP limit must be generous enough to absorb those bursts.
+// The /send endpoint inside chatRoutes has its own auth + global limit.
 await app.register(async (scoped) => {
   await scoped.register(rateLimit, {
-    max: 30,
+    max: 200,
     timeWindow: '1 minute',
     redis,
     keyGenerator: (req) => req.ip,
