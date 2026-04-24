@@ -22,6 +22,11 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Solana Mobile Wallet Adapter association -->
+        <intent-filter>
+            <action android:name="solana-wallet-adapter:///v1/associate" />
+            <category android:name="android.intent.category.DEFAULT" />
+        </intent-filter>
       </activity>
     </application>
 </manifest>

@@ -70,7 +70,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
       const sig = await transact(async (wallet) => {
         if (authToken) {
-          await wallet.reauthorize({ auth_token: authToken })
+          await wallet.reauthorize({
+            auth_token: authToken,
+            identity: {
+              name: 'BagsIndex',
+              uri: 'https://bagsindex.fun',
+              icon: 'favicon.ico',
+            },
+          })
         }
         const signed = await wallet.signAndSendTransactions({
           transactions: [tx],
