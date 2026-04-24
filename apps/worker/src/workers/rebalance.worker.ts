@@ -134,7 +134,7 @@ async function processRebalance(job: Job<RebalanceJobData>) {
       where: { riskTier },
       include: { holdings: true },
     })
-    const activeWallets = subWallets.filter((w) => w.holdings.length > 0)
+    const activeWallets = subWallets.filter((w) => w.holdings.length > 0 && !w.autoRebalancePaused)
 
     await db.rebalanceCycle.update({
       where: { id: rebalanceCycle.id },

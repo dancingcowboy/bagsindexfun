@@ -54,6 +54,16 @@ async function processDeposit(job: Job<DepositJobData>) {
     throw new Error(`No ${deposit.riskTier} sub-wallet for user ${userId}`)
   }
 
+  // Clear the auto-rebalance pause (set by 100% withdrawal) so this tier
+  // participates in AUTO cycles again after the deposit completes.
+  if (subWallet.autoRebalancePaused) {
+    await db.subWallet.update({
+      where: { id: subWallet.id },
+      data: { autoRebalancePaused: false },
+    })
+    logger.info(`[deposit] cleared auto-rebalance pause for wallet ${subWallet.id}`)
+  }
+
   // Check which tokens were already bought in a previous run of this deposit.
   // This makes re-enqueues idempotent — we only buy what's still missing.
   const confirmedSwaps = await db.swapExecution.findMany({

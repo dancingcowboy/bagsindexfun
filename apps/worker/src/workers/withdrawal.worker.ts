@@ -278,6 +278,16 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     logger.error(`[withdrawal] reconcile failed: ${err}`)
   }
 
+  // After a full 100% withdrawal, pause auto-rebalance so the tier doesn't
+  // immediately re-buy. The pause is cleared on next deposit.
+  if (!isPartial) {
+    await db.subWallet.update({
+      where: { id: subWalletId },
+      data: { autoRebalancePaused: true },
+    })
+    logger.info(`[withdrawal] paused auto-rebalance for wallet ${subWalletId}`)
+  }
+
   logger.info(
     `[withdrawal] Liquidation ${status} for ${withdrawalId}: recovered ${totalRecoveredLamports} lamports, ${failedTokens} failures`
   )

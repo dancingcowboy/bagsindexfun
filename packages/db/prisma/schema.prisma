@@ -48,6 +48,9 @@ model SubWallet {
   lastForceRebalanceAt DateTime? @map("last_force_rebalance_at")
   /// 0 = compound all surplus (default). 100 = withdraw all surplus on every AUTO cycle.
   autoTakeProfitPct Int         @default(0) @map("auto_take_profit_pct")
+  /// True after a 100% withdrawal — prevents AUTO rebalance from re-buying.
+  /// Cleared automatically on next deposit.
+  autoRebalancePaused Boolean   @default(false) @map("auto_rebalance_paused")
   createdAt     DateTime        @default(now()) @map("created_at")
   user          User            @relation(fields: [userId], references: [id])
   holdings      Holding[]
