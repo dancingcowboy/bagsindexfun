@@ -93,6 +93,75 @@ export async function authRoutes(app: FastifyInstance) {
   })
 
   /**
+   * POST /auth/mobile-login
+   * Same as /login but returns JWT in response body (no cookie).
+   * Used by React Native app where HttpOnly cookies aren't viable.
+   */
+  app.post('/mobile-login', async (req, reply) => {
+    try {
+      const body = loginSchema.parse(req.body)
+      const claims = await verifyPrivyToken(body.privyToken)
+      const fullUser = await getPrivy().getUser(claims.userId)
+
+      const solanaAccount = (fullUser.linkedAccounts || []).find(
+        (a: any) => a.type === 'wallet' && (a.chainType === 'solana' || a.walletClientType?.includes('solana')),
+      ) as any
+      const walletAddress = solanaAccount?.address || (fullUser as any).wallet?.address
+      if (!walletAddress) {
+        return reply.status(400).send({ error: 'No wallet linked to Privy account' })
+      }
+
+      const user = await db.user.upsert({
+        where: { privyUserId: claims.userId },
+        update: { lastSeenAt: new Date() },
+        create: {
+          privyUserId: claims.userId,
+          walletAddress,
+        },
+        include: { subWallets: true },
+      })
+
+      const existingTiers = new Set(user.subWallets.map((w) => w.riskTier))
+      for (const tier of RISK_TIERS) {
+        if (!existingTiers.has(tier)) {
+          const { walletId, address } = await createSolanaServerWallet()
+          await db.subWallet.create({
+            data: {
+              userId: user.id,
+              riskTier: tier,
+              privyWalletId: walletId,
+              address,
+            },
+          })
+        }
+      }
+      const subWallets = await db.subWallet.findMany({ where: { userId: user.id } })
+
+      const token = app.jwt.sign({
+        sub: user.id,
+        jti: crypto.randomUUID(),
+        privyUserId: user.privyUserId,
+        walletAddress: user.walletAddress,
+      })
+
+      return {
+        success: true,
+        token,
+        data: {
+          user: {
+            id: user.id,
+            walletAddress: user.walletAddress,
+            subWallets: subWallets.map((w) => ({ riskTier: w.riskTier, address: w.address })),
+          },
+        },
+      }
+    } catch (err) {
+      app.log.error(err, 'Mobile login failed')
+      return reply.status(401).send({ error: 'Authentication failed' })
+    }
+  })
+
+  /**
    * POST /auth/logout
    * Adds the current JWT to the Redis denylist so it can't be reused.
    */
