@@ -7,7 +7,8 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   PortfolioTab: undefined
-  IndexTab: undefined
+  MarketTab: undefined
+  AboutTab: undefined
   SettingsTab: undefined
 }
 
@@ -18,8 +19,11 @@ export type PortfolioStackParamList = {
   Progress: { type: 'deposit' | 'withdrawal'; id: string }
 }
 
-export type IndexStackParamList = {
+export type MarketStackParamList = {
   Index: undefined
+  Chart: undefined
+  Hotlist: undefined
+  Analysis: undefined
 }
 
 export type SettingsStackParamList = {

@@ -1,9 +1,13 @@
 import React, { useState } from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native'
+import { useNavigation } from '@react-navigation/native'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import { RISK_TIERS, type RiskTier } from '@bags-index/shared'
 import { useIndexCurrent, useIndexSchedule } from '../api/hooks'
 import { colors } from '../theme/colors'
-import { formatSol, formatPct } from '../utils/format'
+import type { MarketStackParamList } from '../navigation/types'
+
+type Nav = NativeStackNavigationProp<MarketStackParamList, 'Index'>
 
 const TIER_LABELS: Record<string, string> = {
   CONSERVATIVE: 'Conservative',
@@ -12,6 +16,7 @@ const TIER_LABELS: Record<string, string> = {
 }
 
 export function IndexScreen() {
+  const nav = useNavigation<Nav>()
   const [selectedTier, setSelectedTier] = useState<RiskTier>('DEGEN')
   const { data } = useIndexCurrent(selectedTier)
   const { data: scheduleData } = useIndexSchedule()
@@ -21,6 +26,19 @@ export function IndexScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* Quick nav buttons */}
+      <View style={styles.navRow}>
+        <TouchableOpacity style={styles.navBtn} onPress={() => nav.navigate('Chart')} activeOpacity={0.7}>
+          <Text style={styles.navBtnText}>Performance</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navBtn} onPress={() => nav.navigate('Hotlist')} activeOpacity={0.7}>
+          <Text style={styles.navBtnText}>Hotlist</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navBtn} onPress={() => nav.navigate('Analysis')} activeOpacity={0.7}>
+          <Text style={styles.navBtnText}>AI Picks</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Tier tabs */}
       <View style={styles.tabs}>
         {RISK_TIERS.map((tier) => (
@@ -177,6 +195,23 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: 13,
     color: colors.textSecondary,
+  },
+  navRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  navBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: colors.bgCard,
+    alignItems: 'center',
+  },
+  navBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.green,
   },
   empty: {
     textAlign: 'center',

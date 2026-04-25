@@ -192,3 +192,23 @@ export function useSendChatMessage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['chat-messages'] }),
   })
 }
+
+// Index aggregate history for charts
+export function useAggregateHistory(tier: string, hours = 168) {
+  return useQuery({
+    queryKey: ['aggregate-history', tier, hours],
+    queryFn: () =>
+      api.get(`/index/aggregate-history?tier=${tier}&hours=${hours}`).then((r) => r.data),
+    staleTime: 5 * 60_000,
+  })
+}
+
+// AI analysis — latest scoring reasoning + allocations
+export function useAnalysisLatest(tier?: string) {
+  return useQuery({
+    queryKey: ['analysis-latest', tier],
+    queryFn: () =>
+      api.get(`/analysis/latest${tier ? `?tier=${tier}` : ''}`).then((r) => r.data),
+    staleTime: 5 * 60_000,
+  })
+}

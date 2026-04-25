@@ -16,14 +16,26 @@ const config = {
       react: path.resolve(projectRoot, 'node_modules/react'),
       'react-native': path.resolve(projectRoot, 'node_modules/react-native'),
     },
+    // Map .js imports to .ts sources (shared package uses ESM .js extensions)
+    sourceExts: ['ts', 'tsx', 'js', 'jsx', 'json', 'cjs', 'mjs'],
     // Resolve workspace packages
     resolveRequest: (context, moduleName, platform) => {
       if (moduleName === '@bags-index/shared') {
-        return context.resolveRequest(
-          context,
-          path.resolve(monorepoRoot, 'packages/shared/src/index.ts'),
-          platform,
-        );
+        return {
+          filePath: path.resolve(monorepoRoot, 'packages/shared/src/index.ts'),
+          type: 'sourceFile',
+        };
+      }
+      // Handle .js → .ts resolution for workspace packages
+      if (moduleName.startsWith('./') || moduleName.startsWith('../')) {
+        const absPath = path.resolve(path.dirname(context.originModulePath), moduleName);
+        if (absPath.includes('packages/shared/src') && moduleName.endsWith('.js')) {
+          const tsPath = absPath.replace(/\.js$/, '.ts');
+          try {
+            require('fs').accessSync(tsPath);
+            return { filePath: tsPath, type: 'sourceFile' };
+          } catch {}
+        }
       }
       return context.resolveRequest(context, moduleName, platform);
     },
