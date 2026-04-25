@@ -67,6 +67,21 @@ export async function processSnapshot(_job?: Job) {
         continue
       }
 
+      // Outlier guard: if the new valuation jumps >10x or drops <0.1x from
+      // the DB estimate, DexScreener likely returned a bogus priceNative
+      // (e.g. from a dead/scam pair). Keep the old estimate instead.
+      const prevEst = Number(h.valueSolEst ?? 0)
+      if (prevEst > 0.000001) {
+        const ratio = p.valueSol / prevEst
+        if (ratio > 10 || ratio < 0.1) {
+          logger.info(
+            `[price-snapshot] holding outlier skipped ${h.tokenMint.slice(0, 8)}… — prev=${prevEst.toFixed(9)} new=${p.valueSol.toFixed(9)} ratio=${ratio.toFixed(2)}x`,
+          )
+          totalValueSol += prevEst
+          continue
+        }
+      }
+
       totalValueSol += p.valueSol
       await db.holding.update({
         where: { id: h.id },
