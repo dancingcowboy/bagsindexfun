@@ -31,7 +31,8 @@ export function ChartScreen() {
   const [selectedRange, setSelectedRange] = useState(168)
   const { data, isLoading } = useAggregateHistory(selectedTier, selectedRange)
 
-  const points: { t: number; value: number }[] = (data?.data ?? []).map((p: any) => ({
+  const rawPoints: any[] = data?.data?.points ?? data?.data ?? []
+  const points: { t: number; value: number }[] = (Array.isArray(rawPoints) ? rawPoints : []).map((p: any) => ({
     t: new Date(p.t).getTime(),
     value: Number(p.indexed ?? p.value ?? 100),
   }))

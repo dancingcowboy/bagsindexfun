@@ -60,6 +60,7 @@ function SettingsStackScreen() {
 export function MainTabs() {
   return (
     <Tab.Navigator
+      initialRouteName="MarketTab"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -71,14 +72,14 @@ export function MainTabs() {
         tabBarInactiveTintColor: colors.textMuted,
       }}>
       <Tab.Screen
-        name="PortfolioTab"
-        component={PortfolioStackScreen}
-        options={{ title: 'Portfolio' }}
-      />
-      <Tab.Screen
         name="MarketTab"
         component={MarketStackScreen}
         options={{ title: 'Market' }}
+      />
+      <Tab.Screen
+        name="PortfolioTab"
+        component={PortfolioStackScreen}
+        options={{ title: 'Portfolio' }}
       />
       <Tab.Screen
         name="AboutTab"

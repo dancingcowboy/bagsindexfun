@@ -14,7 +14,10 @@ export function HotlistScreen() {
   const [selectedTier, setSelectedTier] = useState<RiskTier>('DEGEN')
   const { data } = useHotlist(selectedTier)
 
-  const tokens = data?.data ?? []
+  const rawData = data?.data
+  const tokens = Array.isArray(rawData)
+    ? rawData[0]?.tokens ?? []
+    : rawData?.tokens ?? []
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -39,11 +42,11 @@ export function HotlistScreen() {
 
       {tokens.map((token: any, i: number) => (
         <TouchableOpacity
-          key={token.mint ?? i}
+          key={token.tokenMint ?? i}
           style={styles.card}
           onPress={() => {
-            if (token.mint) {
-              Linking.openURL(`https://bags.fm/token/${token.mint}`)
+            if (token.tokenMint) {
+              Linking.openURL(`https://bags.fm/token/${token.tokenMint}`)
             }
           }}
           activeOpacity={0.8}>
@@ -51,32 +54,32 @@ export function HotlistScreen() {
             <View style={styles.rankBadge}>
               <Text style={styles.rankText}>{i + 1}</Text>
             </View>
-            <Text style={styles.symbol}>{token.symbol ?? '???'}</Text>
+            <Text style={styles.symbol}>{token.tokenSymbol ?? token.symbol ?? '???'}</Text>
             <View style={styles.scoreBadge}>
               <Text style={styles.scoreText}>{(token.compositeScore ?? 0).toFixed(3)}</Text>
             </View>
           </View>
 
-          {token.name && (
-            <Text style={styles.tokenName} numberOfLines={1}>{token.name}</Text>
+          {(token.tokenName ?? token.name) && (
+            <Text style={styles.tokenName} numberOfLines={1}>{token.tokenName ?? token.name}</Text>
           )}
 
           <View style={styles.statsRow}>
-            {token.price != null && (
+            {token.priceUsd != null && (
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>Price</Text>
                 <Text style={styles.statValue}>
-                  {Number(token.price) < 0.01
-                    ? `$${Number(token.price).toExponential(2)}`
-                    : `$${Number(token.price).toFixed(4)}`}
+                  {Number(token.priceUsd) < 0.01
+                    ? `$${Number(token.priceUsd).toExponential(2)}`
+                    : `$${Number(token.priceUsd).toFixed(4)}`}
                 </Text>
               </View>
             )}
-            {token.marketCap != null && (
+            {token.marketCapUsd != null && (
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>MCap</Text>
                 <Text style={styles.statValue}>
-                  ${(Number(token.marketCap) / 1e6).toFixed(1)}M
+                  ${(Number(token.marketCapUsd) / 1e6).toFixed(1)}M
                 </Text>
               </View>
             )}
@@ -88,11 +91,11 @@ export function HotlistScreen() {
                 </Text>
               </View>
             )}
-            {token.holders != null && (
+            {token.holderCount != null && (
               <View style={styles.stat}>
                 <Text style={styles.statLabel}>Holders</Text>
                 <Text style={styles.statValue}>
-                  {Number(token.holders).toLocaleString()}
+                  {Number(token.holderCount).toLocaleString()}
                 </Text>
               </View>
             )}

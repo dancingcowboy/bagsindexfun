@@ -21,7 +21,7 @@ export function IndexScreen() {
   const { data } = useIndexCurrent(selectedTier)
   const { data: scheduleData } = useIndexSchedule()
 
-  const tokens = data?.data ?? []
+  const tokens = data?.data?.tokens ?? []
   const schedule = scheduleData?.data
 
   return (

@@ -27,7 +27,8 @@ export function AnalysisScreen() {
   const { data } = useAnalysisLatest(selectedTier)
 
   const cycle = data?.data
-  const allocations = cycle?.allocations ?? []
+  const tierData = cycle?.tiers?.[selectedTier]
+  const allocations = Array.isArray(tierData) ? tierData : tierData?.allocations ?? []
   const summary = cycle?.summary ?? cycle?.reasoning
   const completedAt = cycle?.completedAt ?? cycle?.createdAt
 

@@ -2,20 +2,45 @@ import React from 'react'
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import type { CompositeNavigationProp } from '@react-navigation/native'
 import { usePortfolio, useLiquidateHolding } from '../api/hooks'
 import { useAuth } from '../auth/AuthProvider'
 import { TierCard } from '../components/TierCard'
 import { colors } from '../theme/colors'
 import { formatSol, truncateAddress } from '../utils/format'
-import type { PortfolioStackParamList } from '../navigation/types'
+import type { PortfolioStackParamList, RootStackParamList } from '../navigation/types'
 
-type Nav = NativeStackNavigationProp<PortfolioStackParamList, 'Portfolio'>
+type Nav = CompositeNavigationProp<
+  NativeStackNavigationProp<PortfolioStackParamList, 'Portfolio'>,
+  NativeStackNavigationProp<RootStackParamList>
+>
 
 export function PortfolioScreen() {
   const nav = useNavigation<Nav>()
-  const { user } = useAuth()
+  const { user, isAuthenticated } = useAuth()
   const { data, isLoading, refetch } = usePortfolio(true)
   const liquidate = useLiquidateHolding()
+
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.container, styles.gateContainer]}>
+        <Text style={styles.gateLogo}>
+          <Text style={{ color: colors.green }}>bags</Text>
+          <Text style={{ color: colors.textPrimary }}>index</Text>
+        </Text>
+        <Text style={styles.gateTitle}>Your Portfolio</Text>
+        <Text style={styles.gateSubtext}>
+          Connect your wallet to view your vault holdings, deposit SOL, and manage withdrawals.
+        </Text>
+        <TouchableOpacity
+          style={styles.gateBtn}
+          onPress={() => nav.navigate('Login')}
+          activeOpacity={0.8}>
+          <Text style={styles.gateBtnText}>Connect Wallet</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
 
   const portfolio = data?.data
   const tiers = portfolio?.tiers ?? []
@@ -158,5 +183,40 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 8,
     textAlign: 'center',
+  },
+  gateContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  gateLogo: {
+    fontSize: 32,
+    fontWeight: '700',
+    marginBottom: 24,
+  },
+  gateTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 12,
+  },
+  gateSubtext: {
+    fontSize: 15,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 32,
+    paddingHorizontal: 16,
+  },
+  gateBtn: {
+    backgroundColor: colors.green,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    borderRadius: 10,
+  },
+  gateBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.bg,
   },
 })
