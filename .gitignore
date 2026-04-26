@@ -25,6 +25,15 @@ Thumbs.db
 # logs
 *.log
 deploy.sh
-deploy.sh
 
 .claude/
+
+# backups & db dumps
+backups/
+*.sql
+*.sql.gz
+*.sql.gz.gpg
+
+# stray / editor files
+*.save
+endscreen.html
