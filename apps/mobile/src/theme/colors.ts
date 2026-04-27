@@ -14,10 +14,13 @@ export const colors = {
   textSecondary: '#999999',
   textMuted: '#666666',
 
-  // Tier colors
-  tierConservative: '#3B82F6',
-  tierBalanced: '#F59E0B',
-  tierDegen: '#EF4444',
+  // Tier accents — chosen to be neutral identity colors that don't
+  // trigger gain/loss perception. Avoid plain red (looks like losses)
+  // and avoid the brand green (#00D62B) which is reserved for positive
+  // PnL signals across the app.
+  tierConservative: '#38BDF8', // sky blue
+  tierBalanced: '#14B8A6',     // teal — distinct from brand green
+  tierDegen: '#EC4899',        // hot pink
 
   white: '#ffffff',
   black: '#000000',
