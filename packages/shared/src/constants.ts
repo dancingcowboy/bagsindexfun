@@ -178,8 +178,11 @@ export const DEXSCREENER_UNIVERSE_SIZE = 30
 /** Wrapped SOL mint — reference for SOL-denominated valuation. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112'
 
-/** How often to auto-claim accrued Bags trading fees from the vault wallet */
-export const FEE_CLAIM_INTERVAL_HOURS = 4
+/** How often to auto-claim accrued Bags trading fees from the vault wallet.
+ *  Set to 24h to consolidate fee-claim DCA into one daily basket-buy per
+ *  tier instead of six. Fewer claims → fewer swaps → less slippage drag
+ *  and avoids spreading the DCA across intra-day price wiggles. */
+export const FEE_CLAIM_INTERVAL_HOURS = 24
 
 // ─── Rebalance Batching ──────────────────────────────────────────────────────
 
