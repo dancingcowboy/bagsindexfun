@@ -23,7 +23,6 @@ export type PortfolioStackParamList = {
 export type MarketStackParamList = {
   Index: undefined
   Chart: undefined
-  Hotlist: undefined
   Analysis: undefined
 }
 

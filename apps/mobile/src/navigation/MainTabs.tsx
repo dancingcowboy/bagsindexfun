@@ -10,7 +10,6 @@ import { WithdrawScreen } from '../screens/WithdrawScreen'
 import { ProgressScreen } from '../screens/ProgressScreen'
 import { IndexScreen } from '../screens/IndexScreen'
 import { ChartScreen } from '../screens/ChartScreen'
-import { HotlistScreen } from '../screens/HotlistScreen'
 import { AnalysisScreen } from '../screens/AnalysisScreen'
 import { AboutScreen } from '../screens/AboutScreen'
 import { SettingsScreen } from '../screens/SettingsScreen'
@@ -45,7 +44,6 @@ function MarketStackScreen() {
     <MarketStack.Navigator screenOptions={screenOptions}>
       <MarketStack.Screen name="Index" component={IndexScreen} options={{ title: 'Index' }} />
       <MarketStack.Screen name="Chart" component={ChartScreen} options={{ title: 'Performance' }} />
-      <MarketStack.Screen name="Hotlist" component={HotlistScreen} options={{ title: 'Hotlist' }} />
       <MarketStack.Screen name="Analysis" component={AnalysisScreen} options={{ title: 'AI Analysis' }} />
     </MarketStack.Navigator>
   )
