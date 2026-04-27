@@ -7,7 +7,11 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "dapp-store:build-apk": "bash dapp-store/publish.sh build-apk",
+    "dapp-store:submit": "bash dapp-store/publish.sh submit",
+    "dapp-store:publish": "bash dapp-store/publish.sh publish",
+    "dapp-store:resume": "bash dapp-store/publish.sh resume"
   },
   "dependencies": {
     "@bags-index/shared": "workspace:*",

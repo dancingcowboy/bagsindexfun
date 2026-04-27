@@ -1,0 +1,71 @@
+publisher:
+  address: 3T2ZbjE6ZeFZx4PM4u8rR9WiZJMhXapEX72oUd5WLkPc
+  name: Bags Index
+  website: https://bagsindex.fun
+  email: support@bagsindex.fun
+
+app:
+  android_package: com.bagsindex
+  name: Bags Index
+  urls:
+    license_url: https://bagsindex.fun/legal/terms
+    copyright_url: https://bagsindex.fun/legal/copyright
+    privacy_policy_url: https://bagsindex.fun/legal/privacy
+    website: https://bagsindex.fun
+
+release:
+  address: REPLACE_AFTER_RELEASE_NFT_MINT
+  media:
+    - purpose: icon
+      uri: ./assets/icon.png
+    - purpose: banner
+      uri: ./assets/banner.png
+    - purpose: screenshot
+      uri: ./assets/screenshots/01-home.png
+    - purpose: screenshot
+      uri: ./assets/screenshots/02-market-index.png
+    - purpose: screenshot
+      uri: ./assets/screenshots/03-market-chart.png
+    - purpose: screenshot
+      uri: ./assets/screenshots/04-market-analysis.png
+    - purpose: screenshot
+      uri: ./assets/screenshots/05-portfolio-connect.png
+
+  files:
+    - purpose: install
+      uri: ./build/app-release.apk
+
+  catalog:
+    en-US:
+      name: Bags Index
+      short_description: Index fund for Bags tokens on Solana
+      long_description: |
+        Bags Index is the first index fund for tokens launched on Bags.fm.
+        Deposit SOL once and the on-chain agent automatically allocates across
+        the top tokens by composite score (volume, holder growth, liquidity,
+        safety). Three risk tiers — Conservative, Balanced, Degen — each with
+        a √-weighted basket that rebalances on a fixed schedule.
+
+        Features:
+          - Deposit SOL, withdraw any time
+          - Three risk tiers with separate vaults
+          - Automatic rebalancing via on-chain agent
+          - Live performance charts and AI-generated market commentary
+          - Mobile Wallet Adapter — connect Phantom, Solflare, or Seed Vault
+
+        Non-custodial: your sub-wallet is yours, the agent only routes trades
+        you authorize on connect.
+      new_in_version: |
+        Initial release.
+      saga_features_localized: |
+        Native Mobile Wallet Adapter integration. Works with Seed Vault on
+        Seeker for hardware-backed signing.
+
+solana_mobile_dapp_publisher_portal:
+  google_store_package: ""
+  testing_instructions: |
+    1. Install the app and tap Connect Wallet on the Portfolio tab.
+    2. Authorize with any MWA-compatible wallet (Phantom, Solflare, Seed Vault).
+    3. Deposit a small amount of SOL (0.05+) to a sub-wallet of your choice.
+    4. Watch the holdings populate after the next rebalance tick (~minutes).
+    5. Withdraw to verify funds return to your main wallet.

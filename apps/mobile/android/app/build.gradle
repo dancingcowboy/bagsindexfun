@@ -44,9 +44,16 @@ react {
     // extraPackagerArgs = []
 
     /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    //
+    //   pnpm doesn't hoist the hermesc binary into react-native/sdks where
+    //   the RN gradle plugin looks. Resolve from the standalone
+    //   hermes-compiler package in .pnpm. Universal mach-o, works on
+    //   x86_64 + arm64.
+    def hermescCandidates = fileTree("$rootDir/../../../node_modules/.pnpm").matching {
+        include "hermes-compiler@*/node_modules/hermes-compiler/hermesc/osx-bin/hermesc"
+    }
+    if (!hermescCandidates.isEmpty()) {
+        hermesCommand = hermescCandidates.singleFile.absolutePath
+    }
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
 

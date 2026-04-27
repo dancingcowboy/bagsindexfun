@@ -37,3 +37,12 @@ backups/
 # stray / editor files
 *.save
 endscreen.html
+
+# dapp-store: never commit signing material, keypairs, or built APKs
+*.keystore
+*.jks
+apps/mobile/dapp-store/build/
+apps/mobile/dapp-store/assets/*.png
+apps/mobile/dapp-store/assets/screenshots/*.png
+*-publisher.json
+*-publisher-keypair.json
