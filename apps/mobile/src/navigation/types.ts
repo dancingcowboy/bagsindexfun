@@ -6,8 +6,9 @@ export type RootStackParamList = {
 }
 
 export type MainTabParamList = {
-  PortfolioTab: undefined
+  HomeTab: undefined
   MarketTab: undefined
+  PortfolioTab: undefined
   AboutTab: undefined
   SettingsTab: undefined
 }

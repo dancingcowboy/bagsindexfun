@@ -14,6 +14,7 @@ import { HotlistScreen } from '../screens/HotlistScreen'
 import { AnalysisScreen } from '../screens/AnalysisScreen'
 import { AboutScreen } from '../screens/AboutScreen'
 import { SettingsScreen } from '../screens/SettingsScreen'
+import { HomeScreen } from '../screens/HomeScreen'
 import { TabBarIcon } from '../components/TabBarIcon'
 
 const Tab = createBottomTabNavigator<MainTabParamList>()
@@ -61,7 +62,7 @@ function SettingsStackScreen() {
 export function MainTabs() {
   return (
     <Tab.Navigator
-      initialRouteName="MarketTab"
+      initialRouteName="HomeTab"
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -72,6 +73,14 @@ export function MainTabs() {
         tabBarActiveTintColor: colors.green,
         tabBarInactiveTintColor: colors.textMuted,
       }}>
+      <Tab.Screen
+        name="HomeTab"
+        component={HomeScreen}
+        options={{
+          title: 'Home',
+          tabBarIcon: ({ color, size }) => <TabBarIcon name="home" color={color} size={size} />,
+        }}
+      />
       <Tab.Screen
         name="MarketTab"
         component={MarketStackScreen}
