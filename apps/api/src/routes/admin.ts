@@ -105,79 +105,127 @@ export async function adminRoutes(app: FastifyInstance) {
 
       const user = await db.user.findUnique({
         where: { privyUserId: SYSTEM_VAULT_PRIVY_ID },
-        include: { subWallets: { select: { id: true } } },
+        include: { subWallets: { select: { id: true, riskTier: true } } },
       })
       if (!user || user.subWallets.length === 0) {
-        return { success: true, data: { points: [], hours } }
+        return { success: true, data: { points: [], hours, tiers: [] } }
       }
 
       const subWalletIds = user.subWallets.map((w) => w.id)
+      const tierBySubWallet = new Map(user.subWallets.map((w) => [w.id, w.riskTier as string]))
 
-      // Snapshots — sum across sub-wallets per timestamp bucket (currently
-      // one sub-wallet, but tier flips create new rows over time).
       const snapshots = await db.pnlSnapshot.findMany({
         where: { subWalletId: { in: subWalletIds }, createdAt: { gte: since } },
         orderBy: { createdAt: 'asc' },
-        select: { totalValueSol: true, createdAt: true },
+        select: { subWalletId: true, totalValueSol: true, createdAt: true },
       })
       if (snapshots.length < 2) {
-        return { success: true, data: { points: [], hours } }
+        return { success: true, data: { points: [], hours, tiers: [] } }
       }
 
-      // Cashflows — only real fee claims (from audit log metadata).
+      // Cashflows — real fee claims (from audit log metadata) tagged by
+      // tier when the audit log records it. Untagged claims fall through
+      // to all tiers (aggregate path uses every claim regardless).
       const claimLogs = await db.auditLog.findMany({
         where: { action: 'VAULT_FEE_CLAIM', createdAt: { gte: since } },
         select: { metadata: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       })
-      const cashflows = claimLogs.map((l) => {
+      type Cashflow = { t: number; amount: number; riskTier: string | null }
+      const cashflows: Cashflow[] = claimLogs.map((l) => {
         const meta = (l.metadata as Record<string, unknown>) ?? {}
         return {
           t: l.createdAt.getTime(),
           amount: Number(meta.lamportsClaimed ?? 0) / 1e9,
+          riskTier: typeof meta.riskTier === 'string' ? (meta.riskTier as string) : null,
         }
       })
 
-      // Chain TWR. Snapshots already include the cashflow in totalValueSol,
-      // so subtract any flows that arrived in (prev, cur] before computing
-      // the return.
-      //
-      // Outlier guard: any sub-period return outside [-50%, +200%] in a
-      // single hour is almost certainly a snapshot artifact (pre-allocation
-      // zero, drifted amount that got reconciled, RPC blip, etc.) — not a
-      // real price move. Clamp it to step=1 so it can't poison the chain.
-      const MIN_STEP = 0.5
-      const MAX_STEP = 3.0
-      const points: { t: string; twr: number; valueSol: number }[] = []
-      let index = 100
-      points.push({
-        t: snapshots[0].createdAt.toISOString(),
-        twr: 100,
-        valueSol: Number(snapshots[0].totalValueSol),
-      })
-      for (let i = 1; i < snapshots.length; i++) {
-        const prev = snapshots[i - 1]
-        const cur = snapshots[i]
-        const v0 = Number(prev.totalValueSol)
-        const v1 = Number(cur.totalValueSol)
-        const lo = prev.createdAt.getTime()
-        const hi = cur.createdAt.getTime()
-        let cf = 0
-        for (const c of cashflows) {
-          if (c.t > lo && c.t <= hi) cf += c.amount
-        }
-        let step = 1
-        if (v0 > 0) {
-          const adj = v1 - cf
-          step = adj / v0
-          if (!isFinite(step) || step <= 0) step = 1
-          if (step < MIN_STEP || step > MAX_STEP) step = 1
-        }
-        index *= step
-        points.push({ t: cur.createdAt.toISOString(), twr: index, valueSol: v1 })
+      // Bucket snapshots into hourly slots PER TIER. Without this, the prior
+      // implementation chained CONS → BAL → DEGEN steps (different tiers,
+      // totally different SOL values) as if they were the same wallet's
+      // price moves, producing meaningless TWR. Per-tier chaining is the
+      // only correct way once the vault expands past one sub-wallet.
+      const HOUR_MS = 60 * 60 * 1000
+      const tierHourlyValue = new Map<string, Map<number, number>>()
+      for (const s of snapshots) {
+        const tier = tierBySubWallet.get(s.subWalletId)
+        if (!tier) continue
+        const hourBucket = Math.floor(s.createdAt.getTime() / HOUR_MS) * HOUR_MS
+        const tierMap = tierHourlyValue.get(tier) ?? new Map<number, number>()
+        // Sum across multiple sub-wallets within the same tier (tier flips
+        // can create successive sub-wallets of the same tier over time).
+        tierMap.set(hourBucket, (tierMap.get(hourBucket) ?? 0) + Number(s.totalValueSol))
+        tierHourlyValue.set(tier, tierMap)
       }
 
-      return { success: true, data: { points, hours, cashflowCount: cashflows.length } }
+      const MIN_STEP = 0.5
+      const MAX_STEP = 3.0
+
+      const tierResults: { riskTier: string; points: { t: string; twr: number; valueSol: number }[] }[] = []
+      for (const [tier, hourMap] of tierHourlyValue) {
+        const series = [...hourMap.entries()].sort((a, b) => a[0] - b[0])
+        if (series.length < 2) continue
+        const tierCashflows = cashflows.filter((c) => c.riskTier === null || c.riskTier === tier)
+        const pts: { t: string; twr: number; valueSol: number }[] = []
+        let idx = 100
+        pts.push({ t: new Date(series[0][0]).toISOString(), twr: 100, valueSol: series[0][1] })
+        for (let i = 1; i < series.length; i++) {
+          const [t0, v0] = series[i - 1]
+          const [t1, v1] = series[i]
+          let cf = 0
+          for (const c of tierCashflows) {
+            if (c.t > t0 && c.t <= t1) cf += c.amount
+          }
+          let step = 1
+          if (v0 > 0) {
+            const adj = v1 - cf
+            step = adj / v0
+            if (!isFinite(step) || step <= 0) step = 1
+            if (step < MIN_STEP || step > MAX_STEP) step = 1
+          }
+          idx *= step
+          pts.push({ t: new Date(t1).toISOString(), twr: idx, valueSol: v1 })
+        }
+        tierResults.push({ riskTier: tier, points: pts })
+      }
+
+      // Aggregate TWR — sum per-hour values across all tiers, then chain.
+      // This is the canonical "system vault" performance line.
+      const aggHourly = new Map<number, number>()
+      for (const hourMap of tierHourlyValue.values()) {
+        for (const [t, v] of hourMap) {
+          aggHourly.set(t, (aggHourly.get(t) ?? 0) + v)
+        }
+      }
+      const aggSeries = [...aggHourly.entries()].sort((a, b) => a[0] - b[0])
+      const points: { t: string; twr: number; valueSol: number }[] = []
+      if (aggSeries.length >= 2) {
+        let index = 100
+        points.push({ t: new Date(aggSeries[0][0]).toISOString(), twr: 100, valueSol: aggSeries[0][1] })
+        for (let i = 1; i < aggSeries.length; i++) {
+          const [t0, v0] = aggSeries[i - 1]
+          const [t1, v1] = aggSeries[i]
+          let cf = 0
+          for (const c of cashflows) {
+            if (c.t > t0 && c.t <= t1) cf += c.amount
+          }
+          let step = 1
+          if (v0 > 0) {
+            const adj = v1 - cf
+            step = adj / v0
+            if (!isFinite(step) || step <= 0) step = 1
+            if (step < MIN_STEP || step > MAX_STEP) step = 1
+          }
+          index *= step
+          points.push({ t: new Date(t1).toISOString(), twr: index, valueSol: v1 })
+        }
+      }
+
+      return {
+        success: true,
+        data: { points, hours, cashflowCount: cashflows.length, tiers: tierResults },
+      }
     } catch (err) {
       app.log.error(err, 'Failed to compute vault TWR')
       return reply.status(500).send({ error: 'Internal server error' })
