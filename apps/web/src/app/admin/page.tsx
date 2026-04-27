@@ -176,6 +176,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<'overview' | 'users' | 'pnl' | 'audit' | 'campaign' | 'vault' | 'whitelist' | 'custom-vaults'>('overview')
 
   const [vaultLive, setVaultLive] = useState(false)
+  const [pnlHideEmpty, setPnlHideEmpty] = useState(true)
   const vault = useQuery({
     queryKey: ['admin-vault', vaultLive],
     queryFn: () =>
@@ -705,7 +706,24 @@ export default function AdminPage() {
               )}
             </Panel>
 
-            <Panel title={`All Pools (${pnl.data?.data.pools.length ?? 0})`}>
+            <Panel title={(() => {
+              const all = pnl.data?.data.pools ?? []
+              const shown = pnlHideEmpty
+                ? all.filter((p: any) => Number(p.realizedSol) !== 0 || Number(p.currentValueSol) !== 0)
+                : all
+              return `All Pools (${shown.length}${pnlHideEmpty && shown.length !== all.length ? ` of ${all.length}` : ''})`
+            })()}>
+              <div className="flex items-center justify-end gap-2 px-4 pt-2 text-xs text-[var(--color-text-muted)]">
+                <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={pnlHideEmpty}
+                    onChange={(e) => setPnlHideEmpty(e.target.checked)}
+                    className="accent-[var(--color-accent)]"
+                  />
+                  Hide pools with no realized PnL and no current value
+                </label>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -721,7 +739,10 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pnl.data?.data.pools.map((p: any) => {
+                    {(pnlHideEmpty
+                      ? (pnl.data?.data.pools ?? []).filter((p: any) => Number(p.realizedSol) !== 0 || Number(p.currentValueSol) !== 0)
+                      : (pnl.data?.data.pools ?? [])
+                    ).map((p: any) => {
                       const pnlVal = Number(p.totalPnlSol)
                       const positive = pnlVal >= 0
                       return (
