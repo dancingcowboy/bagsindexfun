@@ -20,7 +20,7 @@ export const colors = {
   // PnL signals across the app.
   tierConservative: '#38BDF8', // sky blue
   tierBalanced: '#14B8A6',     // teal — distinct from brand green
-  tierDegen: '#EC4899',        // hot pink
+  tierDegen: '#A855F7',        // vibrant violet — energetic, premium
 
   white: '#ffffff',
   black: '#000000',
