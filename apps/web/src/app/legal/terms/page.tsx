@@ -8,22 +8,54 @@ export default function TermsPage() {
 
       <h2>1. What Bags Index is</h2>
       <p>
-        Bags Index (&quot;the Service&quot;) is a non-custodial Solana
-        application that automatically allocates user-deposited SOL
-        across baskets of tokens launched on Bags.fm. Three risk tiers
-        — Conservative, Balanced, and Degen — each rebalance on a fixed
+        Bags Index (&quot;the Service&quot;) is a Solana application
+        that automatically allocates user-deposited SOL across baskets
+        of tokens launched on Bags.fm. Three risk tiers —
+        Conservative, Balanced, and Degen — each rebalance on a fixed
         schedule using a √-weighted composite score.
       </p>
 
-      <h2>2. Non-custodial nature</h2>
+      <h2>2. Wallet model and custody</h2>
       <p>
-        When you deposit SOL, the Service generates a sub-wallet for
-        you. The agent acts within that sub-wallet on your behalf to
-        execute rebalances. You may withdraw the full sub-wallet
-        balance back to your main wallet at any time. Bags Index does
-        NOT take custody of your main wallet&apos;s funds and cannot
-        sign transactions outside of authorized sub-wallet activity.
+        When you connect, the Service uses{' '}
+        <a href="https://www.privy.io" target="_blank" rel="noreferrer">
+          Privy
+        </a>{' '}
+        to create per-tier sub-wallets bound to your main wallet
+        identity. Bags Index does <strong>not</strong> store sub-wallet
+        private keys; the underlying key material is managed by Privy
+        infrastructure under their security model. The agent signs
+        rebalance and withdrawal transactions inside those sub-wallets
+        on your behalf, scoped to the activity of the Service.
       </p>
+      <p>
+        Practically this means:
+      </p>
+      <ul>
+        <li>
+          Your <em>main</em> wallet remains under your sole control.
+          Bags Index never holds, stores, or has signing authority over
+          your main wallet.
+        </li>
+        <li>
+          Your <em>sub-wallets</em> are created and operated through
+          the Service. You cannot interact with them outside of the
+          Bags Index app or through the Privy session bound to your
+          identity. The Service is therefore custodial in operation
+          even though Bags Index does not itself hold the keys.
+        </li>
+        <li>
+          Withdrawal of the full sub-wallet balance back to your main
+          wallet is always available from inside the app.
+        </li>
+        <li>
+          Continuity of your access depends on the continued operation
+          of the Service and of Privy. If either becomes unavailable,
+          recovery of sub-wallet funds may be delayed or, in adverse
+          scenarios, may require coordination with Privy under their
+          terms.
+        </li>
+      </ul>
 
       <h2>3. Not financial advice</h2>
       <p>

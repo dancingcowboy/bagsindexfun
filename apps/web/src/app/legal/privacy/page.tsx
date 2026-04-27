@@ -8,20 +8,23 @@ export default function PrivacyPage() {
 
       <h2>What we collect</h2>
       <p>
-        Bags Index is a non-custodial Solana application. To operate the
+        Bags Index is a Solana application built on user-bound Privy
+        sub-wallets (see Terms §2 for the wallet model). To operate the
         service we collect only what is strictly required:
       </p>
       <ul>
         <li>
           <strong>Wallet public key.</strong> Your main Solana wallet
           address, captured when you connect via Mobile Wallet Adapter.
-          Used to derive your sub-wallets and load your holdings.
+          Used to bind your Privy sub-wallets to your identity and to
+          load your holdings.
         </li>
         <li>
-          <strong>Sub-wallet public keys.</strong> Per-tier deposit
-          addresses generated server-side. Stored in our database
-          alongside your main wallet for routing deposits and
-          withdrawals.
+          <strong>Sub-wallet public keys.</strong> Per-tier addresses
+          created via Privy and bound to your main wallet identity.
+          Stored in our database alongside your main wallet for routing
+          deposits and withdrawals. We do not store the private keys
+          for these sub-wallets — they are managed by Privy.
         </li>
         <li>
           <strong>On-chain transaction history</strong> for your
@@ -54,6 +57,15 @@ export default function PrivacyPage() {
 
       <h2>Third parties we rely on</h2>
       <ul>
+        <li>
+          <strong>Privy</strong> for sub-wallet creation and key
+          custody. Your main-wallet identity is shared with Privy to
+          bind the sub-wallets to you. See{' '}
+          <a href="https://www.privy.io/legal/privacy-policy" target="_blank" rel="noreferrer">
+            Privy&apos;s privacy policy
+          </a>{' '}
+          for their handling of that data.
+        </li>
         <li>
           <strong>Solana RPC providers</strong> (Helius and others) for
           on-chain reads and transaction submission.
