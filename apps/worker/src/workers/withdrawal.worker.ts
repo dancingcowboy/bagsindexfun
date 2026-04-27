@@ -87,11 +87,11 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   for (const holding of holdingsToSell) {
     if (holding.amount <= 0n) continue
     if (alreadySoldMints.has(holding.tokenMint)) continue
-    // Skip zero-value dust — there's no Jupiter/Bags route for tokens
-    // that have gone to zero, so attempts fail, count as failedTokens,
-    // and force the withdrawal into PARTIAL forever. Reconciliation at
-    // the end cleans these rows up from the DB.
-    if (Number(holding.valueSolEst) <= 0) continue
+    // Note: do NOT pre-skip on valueSolEst <= 0. Stale price-snapshot
+    // estimates would silently leave tokens behind without bumping
+    // failedTokens, masking the failure as CONFIRMED so the user
+    // couldn't /retry. Bags tokens always have burned-liquidity routes;
+    // attempt the sell and let real failures surface as PARTIAL.
 
     // For partial withdrawals, compute the fraction to sell
     const sellAmount = isPartial
@@ -104,8 +104,11 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
     // Retry the build+sign+submit path up to 3 times for transient
     // errors (Bags/Jupiter 429s, quote stalls, confirmation timeouts).
     // Each attempt rebuilds the tx so it gets a fresh blockhash —
-    // submitAndConfirm itself never re-submits.
-    const MAX_ATTEMPTS = 3
+    // submitAndConfirm itself never re-submits. Slippage escalates
+    // 500 → 1000 → 1500 bps so thin-pool sells of full tier-sized
+    // bags don't get stuck on "slippage exceeded" tx reverts.
+    const SLIPPAGE_LADDER_BPS = [500, 1000, 1500]
+    const MAX_ATTEMPTS = SLIPPAGE_LADDER_BPS.length
     let sellResult: { sig: string; outAmount: string | number; slippageBps: number; route: any } | null = null
     let lastErr: any = null
     for (let attempt = 1; attempt <= MAX_ATTEMPTS && !sellResult; attempt++) {
@@ -114,6 +117,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
           tokenMint: holding.tokenMint,
           tokenAmount: sellAmount,
           userPublicKey: subWallet.address,
+          slippageBps: SLIPPAGE_LADDER_BPS[attempt - 1],
         })
         const signed = await signVersionedTxBytes({
           walletId: subWallet.privyWalletId,
@@ -230,8 +234,10 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
       // If ANY sell later needs to be retried, Jupiter creates a transient
       // wSOL ATA (~2.04M lamports rent) which would revert pre-execution on
       // a barely-rent-exempt wallet. Reserve 10M (~0.01 SOL) so the wallet
-      // can still liquidate stuck tokens on a follow-up attempt.
-      const SWEEP_RESERVE = 10_000_000n
+      // can still liquidate stuck tokens on a follow-up attempt. 20M
+      // (~0.02 SOL) gives headroom for ~10 wSOL ATA creations across
+      // future PARTIAL retries without restocking the wallet.
+      const SWEEP_RESERVE = 20_000_000n
       sendable = balanceLamports > SWEEP_RESERVE ? balanceLamports - SWEEP_RESERVE : 0n
     } else {
       const reserveLamports = BigInt(Math.floor(WALLET_RESERVE_SOL * LAMPORTS_PER_SOL))
@@ -254,7 +260,7 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
 
   // Persist the final status only after the payout step, otherwise a failed
   // SOL transfer can incorrectly appear as a completed withdrawal.
-  const status = failedTokens > 0 || payoutFailed ? 'PARTIAL' : 'CONFIRMED'
+  let status: 'CONFIRMED' | 'PARTIAL' = failedTokens > 0 || payoutFailed ? 'PARTIAL' : 'CONFIRMED'
   await db.withdrawal.update({
     where: { id: withdrawalId },
     data: {
@@ -269,13 +275,37 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   // withdrawal some sells may have failed (PARTIAL state) — this catches
   // any token rows that should have been deleted but weren't, and any
   // dust amounts left from rounding.
+  let reconcileFailed = false
   try {
     const r = await reconcileSubWalletHoldings(subWallet.id, subWallet.address)
     logger.info(
       `[withdrawal] reconciled holdings: updated=${r.updated} inserted=${r.inserted} deleted=${r.deleted}`,
     )
   } catch (err) {
+    reconcileFailed = true
     logger.error(`[withdrawal] reconcile failed: ${err}`)
+  }
+
+  // Safety net: on a full liquidation, any non-zero SPL holding still
+  // present after reconcile is a token that didn't sell. Force PARTIAL
+  // so the user can hit /retry — without this, silent skips (route
+  // gaps, ATA rent, slippage reverts that didn't bump failedTokens)
+  // would leave the withdrawal as CONFIRMED with stuck positions.
+  if (!isPartial && status === 'CONFIRMED' && !reconcileFailed) {
+    const leftover = await db.holding.findMany({
+      where: { subWalletId: subWallet.id, amount: { gt: 0n } },
+      select: { tokenMint: true },
+    })
+    if (leftover.length > 0) {
+      logger.error(
+        `[withdrawal] reconcile found ${leftover.length} leftover SPL holdings after full liquidation — forcing PARTIAL`,
+      )
+      await db.withdrawal.update({
+        where: { id: withdrawalId },
+        data: { status: 'PARTIAL' },
+      })
+      status = 'PARTIAL'
+    }
   }
 
   // After a full 100% withdrawal, pause auto-rebalance so the tier doesn't
