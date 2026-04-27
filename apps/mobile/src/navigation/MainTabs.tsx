@@ -14,6 +14,7 @@ import { HotlistScreen } from '../screens/HotlistScreen'
 import { AnalysisScreen } from '../screens/AnalysisScreen'
 import { AboutScreen } from '../screens/AboutScreen'
 import { SettingsScreen } from '../screens/SettingsScreen'
+import { TabBarIcon } from '../components/TabBarIcon'
 
 const Tab = createBottomTabNavigator<MainTabParamList>()
 const PortfolioStack = createNativeStackNavigator<PortfolioStackParamList>()
@@ -74,22 +75,34 @@ export function MainTabs() {
       <Tab.Screen
         name="MarketTab"
         component={MarketStackScreen}
-        options={{ title: 'Market' }}
+        options={{
+          title: 'Market',
+          tabBarIcon: ({ color, size }) => <TabBarIcon name="market" color={color} size={size} />,
+        }}
       />
       <Tab.Screen
         name="PortfolioTab"
         component={PortfolioStackScreen}
-        options={{ title: 'Portfolio' }}
+        options={{
+          title: 'Portfolio',
+          tabBarIcon: ({ color, size }) => <TabBarIcon name="portfolio" color={color} size={size} />,
+        }}
       />
       <Tab.Screen
         name="AboutTab"
         component={AboutScreen}
-        options={{ title: 'About' }}
+        options={{
+          title: 'About',
+          tabBarIcon: ({ color, size }) => <TabBarIcon name="about" color={color} size={size} />,
+        }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsStackScreen}
-        options={{ title: 'Settings' }}
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => <TabBarIcon name="settings" color={color} size={size} />,
+        }}
       />
     </Tab.Navigator>
   )
