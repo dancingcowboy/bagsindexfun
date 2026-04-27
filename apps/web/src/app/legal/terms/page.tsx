@@ -25,26 +25,83 @@ export default function TermsPage() {
         sign transactions outside of authorized sub-wallet activity.
       </p>
 
-      <h2>3. No investment advice</h2>
+      <h2>3. Not financial advice</h2>
       <p>
-        Nothing on Bags Index is financial, investment, legal, or tax
-        advice. The composite scores, AI-generated commentary, and
-        risk-tier labels are heuristic outputs of automated systems and
-        should not be treated as recommendations. You are solely
-        responsible for assessing whether to use the Service.
+        <strong>Nothing on Bags Index is financial, investment, legal,
+        or tax advice.</strong> The composite scores, tier labels
+        (Conservative / Balanced / Degen), AI-generated commentary,
+        rebalance schedule, performance charts, time-weighted return
+        (TWR) figures, and any other quantitative or qualitative
+        outputs in the app or on this website are heuristic results of
+        automated systems. They are NOT recommendations, predictions,
+        or solicitations to buy, sell, or hold any token. You are
+        solely responsible for evaluating whether to use the Service
+        and for any consequences of doing so.
       </p>
 
-      <h2>4. Token risk</h2>
+      <h2>4. Past performance is not indicative of future results</h2>
       <p>
-        Tokens listed on Bags.fm are highly volatile and may go to
-        zero. Memecoin and microcap exposure carries extreme risk of
-        total loss. The Service routes trades into and out of these
-        tokens based on score; it does not insure against price moves,
-        rug pulls, contract exploits, liquidity disappearance, or any
-        other token-level failure mode.
+        <strong>Past performance is never indicative of future
+        outcomes.</strong> The historical returns, index lines, tier
+        backtests, and per-token performance figures shown in the app
+        and on this website describe what happened previously under
+        specific market conditions. They make no representation about
+        future returns. Future returns may be materially worse,
+        including total loss of deposited SOL.
       </p>
 
-      <h2>5. Eligibility</h2>
+      <h2>5. Bags ecosystem volatility — user acknowledgment</h2>
+      <p>
+        By using the Service you acknowledge and accept that you are
+        exposing your deposited SOL to the full volatility of the
+        Bags.fm token ecosystem. You specifically acknowledge that:
+      </p>
+      <ul>
+        <li>
+          Any token in any tier may go to zero at any time, including
+          immediately after a rebalance.
+        </li>
+        <li>
+          Tokens may be subject to rug pulls, smart-contract exploits,
+          insider selling, liquidity removal, social-media-driven
+          collapses, regulatory action, or any other failure mode
+          common to memecoins and microcap tokens.
+        </li>
+        <li>
+          The agent rebalances based on a score that may rise or fall
+          rapidly. The basket you are exposed to today is not
+          guaranteed to be the basket you are exposed to tomorrow.
+        </li>
+        <li>
+          Slippage, MEV, failed transactions, and on-chain delays may
+          cause executed prices to diverge significantly from observed
+          market prices.
+        </li>
+        <li>
+          The &quot;Conservative&quot; tier is conservative
+          <em> only relative to the other Bags Index tiers</em>. It is
+          NOT conservative relative to traditional financial
+          instruments and remains exposed to memecoin-grade risk.
+        </li>
+      </ul>
+      <p>
+        <strong>
+          You assume all risk of using the Service. Do not deposit more
+          SOL than you can afford to lose entirely.
+        </strong>
+      </p>
+
+      <h2>6. Token risk surface</h2>
+      <p>
+        The Service routes trades into and out of Bags.fm tokens based
+        on score. It does not insure against any price move, rug pull,
+        contract exploit, liquidity disappearance, oracle failure, or
+        any other token-level failure mode. Bags Index is not
+        affiliated with any individual token creator and does not
+        endorse any token included in any basket.
+      </p>
+
+      <h2>7. Eligibility</h2>
       <p>
         You must be of legal age in your jurisdiction to use the
         Service. You may not use the Service if you are a resident of,
@@ -52,7 +109,7 @@ export default function TermsPage() {
         decentralized financial services is prohibited.
       </p>
 
-      <h2>6. Fees</h2>
+      <h2>8. Fees</h2>
       <p>
         The Service may charge a performance or management fee, claimed
         on-chain from your sub-wallet on a fixed schedule. Current fee
@@ -60,14 +117,15 @@ export default function TermsPage() {
         Network transaction fees (gas) are paid from your sub-wallet.
       </p>
 
-      <h2>7. No warranties</h2>
+      <h2>9. No warranties</h2>
       <p>
         The Service is provided &quot;as is&quot; without warranty of
         any kind. We do not guarantee uptime, rebalance frequency,
-        accuracy of data feeds, or that any deposit will appreciate.
+        accuracy of data feeds, completeness of safety checks, or that
+        any deposit will appreciate.
       </p>
 
-      <h2>8. Limitation of liability</h2>
+      <h2>10. Limitation of liability</h2>
       <p>
         To the maximum extent permitted by law, Bags Index, its
         operators, and contributors are not liable for any indirect,
@@ -76,14 +134,14 @@ export default function TermsPage() {
         Service.
       </p>
 
-      <h2>9. Changes</h2>
+      <h2>11. Changes</h2>
       <p>
         We may update these Terms at any time. Material changes will be
         announced in-app. Continued use of the Service constitutes
         acceptance of the updated Terms.
       </p>
 
-      <h2>10. Contact</h2>
+      <h2>12. Contact</h2>
       <p>
         <a href="mailto:support@bagsindex.fun">support@bagsindex.fun</a>
       </p>
