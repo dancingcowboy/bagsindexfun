@@ -445,10 +445,9 @@ export default function AdminPage() {
             ) : (
               <div className="space-y-6">
                 {/* Top KPIs */}
-                <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                <div className="grid grid-cols-2 gap-4">
                   <Stat icon={<Users className="h-4 w-4" />} label="Users" value={o.users.total.toString()} sub={`+${o.users.new24h} 24h · +${o.users.new7d} 7d`} />
                   <Stat icon={<Coins className="h-4 w-4" />} label="Total Deposited" value={`${fmt(o.deposits.totalSol)} SOL`} sub={`${o.deposits.total} deposits · ${o.deposits.count24h} in 24h`} />
-                  <Stat icon={<Activity className="h-4 w-4" />} label="Fees Collected" value={`${fmt(Number(o.deposits.totalFeeSol) + Number(o.withdrawals.totalFeeSol))} SOL`} sub={`${fmt(o.deposits.totalFeeSol)} deposit · ${fmt(o.withdrawals.totalFeeSol)} withdrawal`} />
                 </div>
 
                 {/* Per-tier capacity vs ceiling. Ceiling = batch_size × tier_interval_h.
@@ -501,7 +500,6 @@ export default function AdminPage() {
                         <th className="py-2">Tier</th>
                         <th className="py-2 text-right">Deposits</th>
                         <th className="py-2 text-right">Volume (SOL)</th>
-                        <th className="py-2 text-right">Fees (SOL)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -517,7 +515,6 @@ export default function AdminPage() {
                           </td>
                           <td className="py-2.5 text-right font-[family-name:var(--font-mono)]">{t.deposits}</td>
                           <td className="py-2.5 text-right font-[family-name:var(--font-mono)]">{fmt(t.totalSol)}</td>
-                          <td className="py-2.5 text-right font-[family-name:var(--font-mono)]">{fmt(t.feeSol)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -969,14 +966,13 @@ export default function AdminPage() {
                 <Panel title="Recent Claims">
                   <table className="w-full text-sm">
                     <thead className="text-left text-[var(--color-text-muted)]">
-                      <tr><th className="p-3">When</th><th className="p-3 text-right">Amount (SOL)</th><th className="p-3 text-right">Fee (SOL)</th><th className="p-3 text-right">Status</th></tr>
+                      <tr><th className="p-3">When</th><th className="p-3 text-right">Amount (SOL)</th><th className="p-3 text-right">Status</th></tr>
                     </thead>
                     <tbody>
                       {vault.data.data.recentClaims.map((c) => (
                         <tr key={c.id} className="border-t border-[var(--color-border-subtle)]">
                           <td className="p-3 text-xs">{new Date(c.createdAt).toLocaleString()}</td>
                           <td className="p-3 text-right">{c.amountSol}</td>
-                          <td className="p-3 text-right">{c.feeSol}</td>
                           <td className="p-3 text-right text-xs">{c.status}</td>
                         </tr>
                       ))}
