@@ -6,6 +6,7 @@ import {
   signVersionedTxBytes,
   transferSolFromServerWallet,
   getNativeSolBalanceLamports,
+  getTokenBalances,
 } from '@bags-index/solana'
 import {
   QUEUE_WITHDRAWAL,
@@ -84,14 +85,35 @@ async function processWithdrawal(job: Job<WithdrawalJobData>) {
   if (tokenMint && holdingsToSell.length === 0) {
     throw new Error(`Token ${tokenMint} not held in sub-wallet ${subWalletId}`)
   }
+  // Verify on-chain balances and prune stale DB holdings before selling.
+  // Prevents attempting swaps for tokens already gone on-chain (e.g. after
+  // a failed rebalance that sold on-chain but didn't update the DB).
+  let onChainByMint: Map<string, bigint> | null = null
+  try {
+    const balances = await getTokenBalances(subWallet.address)
+    onChainByMint = new Map<string, bigint>()
+    for (const t of balances.tokens ?? []) {
+      onChainByMint.set(t.mint, BigInt(t.amount))
+    }
+  } catch (err) {
+    logger.error(`[withdrawal] Failed to fetch on-chain balances, proceeding with DB amounts: ${err}`)
+  }
+
   for (const holding of holdingsToSell) {
     if (holding.amount <= 0n) continue
     if (alreadySoldMints.has(holding.tokenMint)) continue
-    // Note: do NOT pre-skip on valueSolEst <= 0. Stale price-snapshot
-    // estimates would silently leave tokens behind without bumping
-    // failedTokens, masking the failure as CONFIRMED so the user
-    // couldn't /retry. Bags tokens always have burned-liquidity routes;
-    // attempt the sell and let real failures surface as PARTIAL.
+
+    // If on-chain balance is 0 but DB says otherwise, clean up the stale row
+    if (onChainByMint) {
+      const onChain = onChainByMint.get(holding.tokenMint) ?? 0n
+      if (onChain <= 0n) {
+        logger.info(`[withdrawal] ${holding.tokenMint.slice(0, 8)}… has 0 on-chain but ${holding.amount} in DB — deleting stale holding`)
+        await db.holding.delete({
+          where: { subWalletId_tokenMint: { subWalletId: subWallet.id, tokenMint: holding.tokenMint } },
+        }).catch(() => {})
+        continue
+      }
+    }
 
     // For partial withdrawals, compute the fraction to sell
     const sellAmount = isPartial
