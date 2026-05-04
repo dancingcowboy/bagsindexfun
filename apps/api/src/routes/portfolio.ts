@@ -22,7 +22,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const wantsLive = req.query.live === '1' || req.query.live === 'true'
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         include: { holdings: true },
       })
 
@@ -531,7 +531,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
     try {
       const userId = req.authUser!.userId
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         include: { holdings: true },
       })
 
@@ -671,7 +671,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         select: { id: true, address: true, riskTier: true },
       })
       if (wallets.length === 0) {
@@ -740,7 +740,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         select: { id: true, riskTier: true },
       })
       if (wallets.length === 0) {
@@ -891,7 +891,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         select: { id: true, address: true, riskTier: true },
       })
       if (wallets.length === 0) {
@@ -988,7 +988,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const since = new Date(Date.now() - hours * 60 * 60 * 1000)
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         include: { holdings: { select: { tokenMint: true } } },
       })
       const mints = new Set<string>()
@@ -1050,7 +1050,7 @@ export async function portfolioRoutes(app: FastifyInstance) {
       const userId = req.authUser!.userId
 
       const wallets = await db.subWallet.findMany({
-        where: { userId },
+        where: { userId, riskTier: { not: null } },
         select: { id: true },
       })
       if (wallets.length === 0) {
