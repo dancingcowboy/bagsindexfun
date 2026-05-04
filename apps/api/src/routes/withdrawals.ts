@@ -28,10 +28,11 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'No holdings to withdraw' })
       }
 
-      // Block only on PENDING (actively running). PARTIAL is terminal —
-      // holdings have moved on (rebalances), so a new withdrawal against
-      // current vault state is the right UX. Old PARTIAL rows remain in
-      // history and can still be retried explicitly via /:id/retry.
+      // Block only on PENDING (actively running) AND less than 10 minutes old.
+      // If a PENDING withdrawal is older than 10 min the worker likely crashed
+      // without transitioning it — auto-expire it to PARTIAL so users aren't
+      // permanently locked out of withdrawals.
+      const STALE_THRESHOLD_MS = 10 * 60 * 1000
       const inflight = await db.withdrawal.findFirst({
         where: {
           userId,
@@ -40,7 +41,15 @@ export async function withdrawalRoutes(app: FastifyInstance) {
         },
       })
       if (inflight) {
-        return reply.status(409).send({ error: 'Withdrawal already in progress for this tier' })
+        const age = Date.now() - new Date(inflight.createdAt).getTime()
+        if (age > STALE_THRESHOLD_MS) {
+          await db.withdrawal.update({
+            where: { id: inflight.id },
+            data: { status: 'PARTIAL', confirmedAt: new Date() },
+          })
+        } else {
+          return reply.status(409).send({ error: 'Withdrawal already in progress for this tier' })
+        }
       }
 
       const totalValueSol = subWallet.holdings.reduce(

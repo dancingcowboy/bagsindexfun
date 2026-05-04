@@ -365,8 +365,17 @@ export function createWithdrawalWorker() {
   worker.on('completed', (job) => {
     console.log(`[withdrawal] Job ${job.id} completed`)
   })
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     console.error(`[withdrawal] Job ${job?.id} failed:`, err.message)
+    // Transition PENDING → PARTIAL so the user isn't locked out of future withdrawals.
+    if (job?.data?.withdrawalId) {
+      try {
+        await db.withdrawal.updateMany({
+          where: { id: job.data.withdrawalId, status: 'PENDING' },
+          data: { status: 'PARTIAL', confirmedAt: new Date() },
+        })
+      } catch {}
+    }
   })
 
   return worker
