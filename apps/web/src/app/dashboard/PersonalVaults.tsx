@@ -1,6 +1,7 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { usePrivy } from '@privy-io/react-auth'
 import { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Trash2, Settings, Pause, Play } from 'lucide-react'
@@ -22,6 +23,7 @@ function parseMints(raw: string): string[] {
 }
 
 export function PersonalVaults() {
+  const { authenticated } = usePrivy()
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [editingVault, setEditingVault] = useState<string | null>(null)
@@ -31,9 +33,11 @@ export function PersonalVaults() {
   const [editInterval, setEditInterval] = useState(2)
   const [liquidatingKey, setLiquidatingKey] = useState<string | null>(null)
 
-  const { data: vaultsRes, isLoading } = useQuery({
+  const { data: vaultsRes, isLoading, isError } = useQuery({
     queryKey: ['custom-vaults'],
     queryFn: () => api.getCustomVaults(),
+    enabled: authenticated,
+    retry: 2,
   })
   const vaults = vaultsRes?.data ?? []
 
@@ -202,6 +206,8 @@ export function PersonalVaults() {
       {/* Vault list */}
       {isLoading ? (
         <div className="card p-8 text-center text-[var(--color-text-muted)]">Loading…</div>
+      ) : isError ? (
+        <div className="card p-8 text-center text-red-400">Failed to load vaults — try refreshing</div>
       ) : vaults.length === 0 && !showCreate ? (
         <div className="card p-8 text-center text-[var(--color-text-muted)]">
           No personal vaults yet — create one to build your own index
