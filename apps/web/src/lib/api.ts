@@ -341,6 +341,34 @@ class ApiClient {
     })
   }
 
+  depositCustomVault(id: string, amountSol: number) {
+    return this.fetch<{ data: { vaultId: string; subWalletAddress: string; amountSol: number } }>(
+      `/custom-vaults/${id}/deposit`,
+      { method: 'POST', body: JSON.stringify({ amountSol }) },
+    )
+  }
+
+  confirmCustomVaultDeposit(id: string, txSignature: string, amountSol: number) {
+    return this.fetch<{ data: { confirmed: boolean; rebalanceQueued: boolean } }>(
+      `/custom-vaults/${id}/deposit/confirm`,
+      { method: 'POST', body: JSON.stringify({ txSignature, amountSol }) },
+    )
+  }
+
+  setCustomVaultAutoTp(id: string, pct: number) {
+    return this.fetch<{ data: { pct: number } }>(`/custom-vaults/${id}/auto-tp`, {
+      method: 'PUT',
+      body: JSON.stringify({ pct }),
+    })
+  }
+
+  liquidateCustomVaultHolding(vaultId: string, mint: string) {
+    return this.fetch<{ data: { id: string; status: string } }>(
+      `/custom-vaults/${vaultId}/liquidate/${mint}`,
+      { method: 'POST' },
+    )
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')

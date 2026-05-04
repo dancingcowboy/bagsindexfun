@@ -1,32 +1,24 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Pause, Play, RefreshCw, Trash2, Copy, Check, Settings } from 'lucide-react'
+import { Plus, Trash2, Settings, Pause, Play } from 'lucide-react'
+import { TierHoldingsCard, TIER_COLORS } from '@/components/TierHoldingsCard'
 import { api } from '@/lib/api'
-import { useCallback } from 'react'
 
-function shortenMint(mint: string) {
-  return `${mint.slice(0, 4)}…${mint.slice(-4)}`
+const VAULT_COLOR = {
+  bg: 'rgba(251, 191, 36, 0.06)',
+  border: 'rgba(251, 191, 36, 0.35)',
+  text: '#fbbf24',
+  chip: '#f59e0b',
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = useCallback(() => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [text])
-  return (
-    <button
-      onClick={copy}
-      className="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-      title="Copy address"
-    >
-      {copied ? <Check className="h-3 w-3 text-[#00D62B]" /> : <Copy className="h-3 w-3" />}
-    </button>
-  )
+function parseMints(raw: string): string[] {
+  return raw
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 32 && s.length <= 44)
 }
 
 export function PersonalVaults() {
@@ -37,6 +29,7 @@ export function PersonalVaults() {
   const [intervalHours, setIntervalHours] = useState(2)
   const [editMints, setEditMints] = useState<string[]>([])
   const [editInterval, setEditInterval] = useState(2)
+  const [liquidatingKey, setLiquidatingKey] = useState<string | null>(null)
 
   const { data: vaultsRes, isLoading } = useQuery({
     queryKey: ['custom-vaults'],
@@ -87,11 +80,26 @@ export function PersonalVaults() {
     },
   })
 
-  function parseMints(raw: string): string[] {
-    return raw
-      .split(/[\n,]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length >= 32 && s.length <= 44)
+  const [tpPending, setTpPending] = useState<string | null>(null)
+
+  async function handleSetAutoTp(vaultId: string, pct: number) {
+    setTpPending(`PERSONAL:${pct}`)
+    try {
+      await api.setCustomVaultAutoTp(vaultId, pct)
+      queryClient.invalidateQueries({ queryKey: ['custom-vaults'] })
+    } finally {
+      setTpPending(null)
+    }
+  }
+
+  async function handleLiquidateHolding(mint: string, vaultId: string) {
+    setLiquidatingKey(`PERSONAL:${mint}`)
+    try {
+      await api.liquidateCustomVaultHolding(vaultId, mint)
+      queryClient.invalidateQueries({ queryKey: ['custom-vaults'] })
+    } finally {
+      setLiquidatingKey(null)
+    }
   }
 
   function handleCreate() {
@@ -109,6 +117,11 @@ export function PersonalVaults() {
   function handleUpdate(id: string) {
     if (editMints.length === 0) return
     updateMut.mutate({ id, tokenMints: editMints, rebalanceIntervalSec: editInterval * 3600 })
+  }
+
+  // Register the custom vault color so TierHoldingsCard can use it
+  if (!TIER_COLORS['PERSONAL']) {
+    TIER_COLORS['PERSONAL'] = VAULT_COLOR
   }
 
   return (
@@ -194,78 +207,71 @@ export function PersonalVaults() {
           No personal vaults yet — create one to build your own index
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {vaults.map((v: any) => {
-            const holdings = v.subWallet?.holdings ?? []
+            const holdings = (v.subWallet?.holdings ?? []).map((h: any) => {
+              const totalVal = (v.subWallet?.holdings ?? []).reduce(
+                (s: number, x: any) => s + Number(x.valueSolEst || 0),
+                0,
+              )
+              const val = Number(h.valueSolEst || 0)
+              return {
+                tokenMint: h.tokenMint,
+                tokenSymbol: null,
+                amount: h.amount,
+                valueSol: val,
+                allocationPct: totalVal > 0 ? ((val / totalVal) * 100).toFixed(2) : '0',
+              }
+            })
             const totalValue = holdings.reduce(
-              (s: number, h: any) => s + Number(h.valueSolEst || 0),
+              (s: number, h: any) => s + Number(h.valueSol),
               0,
             )
             const isEditing = editingVault === v.id
+            const autoTpPct = v.subWallet?.autoTakeProfitPct ?? 0
 
             return (
-              <div key={v.id} className="card overflow-hidden">
-                <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-                  <div className="flex items-center gap-3">
+              <div key={v.id} className="space-y-0">
+                {/* Vault management bar */}
+                <div className="flex items-center justify-between rounded-t-2xl border border-b-0 px-4 py-2"
+                  style={{ borderColor: VAULT_COLOR.border, background: VAULT_COLOR.bg }}
+                >
+                  <div className="flex items-center gap-2">
                     <div
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{
-                        background: v.status === 'ACTIVE' ? '#00D62B' : '#F59E0B',
-                      }}
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: v.status === 'ACTIVE' ? '#00D62B' : '#F59E0B' }}
                     />
-                    <div>
-                      <div className="text-sm font-bold">
-                        Vault {v.id.slice(0, 6)} · {v.tokenMints.length} tokens
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] text-[var(--color-text-muted)]">
-                        <span>{v.subWallet?.address ? shortenMint(v.subWallet.address) : '—'}</span>
-                        {v.subWallet?.address && <CopyButton text={v.subWallet.address} />}
-                        <span>· every {v.rebalanceIntervalSec / 3600}h</span>
-                        {v.lastRebalancedAt && (
-                          <span>
-                            · last {new Date(v.lastRebalancedAt).toLocaleDateString()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    <span className="text-xs font-bold" style={{ color: VAULT_COLOR.text }}>
+                      Vault {v.id.slice(0, 6)} · {v.tokenMints.length} tokens · every {v.rebalanceIntervalSec / 3600}h
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={() => (isEditing ? setEditingVault(null) : startEdit(v))}
-                      className="rounded p-1.5 hover:bg-[var(--color-bg-hover)]"
-                      title="Edit"
+                      className="rounded p-1.5 hover:bg-white/10"
+                      title="Edit tokens/interval"
                     >
-                      <Settings className="h-3.5 w-3.5" />
+                      <Settings className="h-3.5 w-3.5" style={{ color: VAULT_COLOR.text }} />
                     </button>
                     {v.status === 'ACTIVE' ? (
                       <button
                         onClick={() => pauseMut.mutate(v.id)}
                         disabled={pauseMut.isPending}
-                        className="rounded p-1.5 hover:bg-[var(--color-bg-hover)]"
-                        title="Pause"
+                        className="rounded p-1.5 hover:bg-white/10"
+                        title="Pause auto-rebalance"
                       >
-                        <Pause className="h-3.5 w-3.5" />
+                        <Pause className="h-3.5 w-3.5" style={{ color: VAULT_COLOR.text }} />
                       </button>
                     ) : (
                       <button
                         onClick={() => resumeMut.mutate(v.id)}
                         disabled={resumeMut.isPending}
-                        className="rounded p-1.5 hover:bg-[var(--color-bg-hover)]"
-                        title="Resume"
+                        className="rounded p-1.5 hover:bg-white/10"
+                        title="Resume auto-rebalance"
                       >
-                        <Play className="h-3.5 w-3.5" />
+                        <Play className="h-3.5 w-3.5" style={{ color: VAULT_COLOR.text }} />
                       </button>
                     )}
-                    <button
-                      onClick={() => rebalanceMut.mutate(v.id)}
-                      disabled={rebalanceMut.isPending}
-                      className="rounded p-1.5 hover:bg-[var(--color-bg-hover)]"
-                      title="Rebalance now"
-                    >
-                      <RefreshCw
-                        className={`h-3.5 w-3.5 ${rebalanceMut.isPending ? 'animate-spin' : ''}`}
-                      />
-                    </button>
                     <button
                       onClick={() => {
                         if (confirm('Delete this vault? Holdings will remain until withdrawn.')) {
@@ -274,7 +280,7 @@ export function PersonalVaults() {
                       }}
                       disabled={deleteMut.isPending}
                       className="rounded p-1.5 text-red-400 hover:bg-red-400/10"
-                      title="Delete"
+                      title="Delete vault"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -283,7 +289,9 @@ export function PersonalVaults() {
 
                 {/* Edit form */}
                 {isEditing && (
-                  <div className="border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-4 space-y-3">
+                  <div className="border-x border-b-0 px-4 py-3 space-y-3"
+                    style={{ borderColor: VAULT_COLOR.border, background: 'rgba(251,191,36,0.03)' }}
+                  >
                     <div>
                       <label className="mb-1 block text-[10px] font-bold uppercase text-[var(--color-text-muted)]">
                         Token Mints
@@ -308,7 +316,8 @@ export function PersonalVaults() {
                       <button
                         onClick={() => handleUpdate(v.id)}
                         disabled={updateMut.isPending}
-                        className="ml-auto rounded bg-[var(--color-accent)] px-3 py-1 text-[10px] font-bold uppercase text-black"
+                        className="ml-auto rounded px-3 py-1 text-[10px] font-bold uppercase text-black"
+                        style={{ background: VAULT_COLOR.chip }}
                       >
                         {updateMut.isPending ? 'Saving…' : 'Save'}
                       </button>
@@ -316,36 +325,38 @@ export function PersonalVaults() {
                   </div>
                 )}
 
-                {/* Holdings */}
-                <div className="px-4 py-3">
-                  {holdings.length === 0 ? (
-                    <p className="text-xs text-[var(--color-text-muted)]">
-                      Send SOL to the vault address above to fund it. The rebalancer will buy tokens on the next cycle.
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <div className="mb-2 flex items-center justify-between text-[10px] text-[var(--color-text-muted)]">
-                        <span>{holdings.length} holdings</span>
-                        <span className="font-[family-name:var(--font-mono)] text-[var(--color-text-primary)]">
-                          {totalValue.toFixed(4)} SOL
-                        </span>
-                      </div>
-                      {holdings.map((h: any) => (
-                        <div
-                          key={h.tokenMint}
-                          className="flex items-center justify-between text-xs"
-                        >
-                          <span className="font-[family-name:var(--font-mono)] text-[var(--color-text-muted)]">
-                            {shortenMint(h.tokenMint)}
-                          </span>
-                          <span className="font-[family-name:var(--font-mono)]">
-                            {Number(h.valueSolEst || 0).toFixed(4)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {/* TierHoldingsCard for the vault */}
+                {holdings.length === 0 ? (
+                  <div
+                    className="rounded-b-2xl border px-5 py-6 text-center text-xs text-[var(--color-text-muted)]"
+                    style={{ borderColor: VAULT_COLOR.border, background: VAULT_COLOR.bg }}
+                  >
+                    Send SOL to the vault address to fund it. The rebalancer will buy tokens on the next cycle.
+                  </div>
+                ) : (
+                  <div className={isEditing ? '' : '-mt-px'}>
+                    <TierHoldingsCard
+                      tier={{
+                        riskTier: 'PERSONAL',
+                        walletAddress: v.subWallet?.address,
+                        totalValueSol: totalValue,
+                        holdings,
+                      }}
+                      forceReshuffle={{
+                        onClick: () => rebalanceMut.mutate(v.id),
+                        pending: rebalanceMut.isPending,
+                        message: rebalanceMut.isSuccess ? 'Queued' : undefined,
+                      }}
+                      autoTp={{
+                        value: autoTpPct,
+                        onChange: (_tier, pct) => handleSetAutoTp(v.id, pct),
+                        pending: tpPending,
+                      }}
+                      onLiquidateHolding={(mint, _tier, _sym, _val) => handleLiquidateHolding(mint, v.id)}
+                      liquidatingKey={liquidatingKey}
+                    />
+                  </div>
+                )}
               </div>
             )
           })}

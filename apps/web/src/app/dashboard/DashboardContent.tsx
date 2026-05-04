@@ -278,7 +278,8 @@ export default function DashboardPage() {
   // 'single' = deposit all SOL into one tier (classic flow).
   // 'split'  = split the total equally across all three vaults in one
   //            signed transaction, then queue 3 allocation progress modals.
-  const [depositMode, setDepositMode] = useState<'single' | 'split'>('single')
+  const [depositMode, setDepositMode] = useState<'single' | 'split' | 'vault'>('single')
+  const [depositVaultId, setDepositVaultId] = useState<string | null>(null)
   const [depositing, setDepositing] = useState(false)
   const [depositStatus, setDepositStatus] = useState<string | null>(null)
   const [showWithdraw, setShowWithdraw] = useState(false)
@@ -381,6 +382,13 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
   })
 
+  const { data: customVaultsRes } = useQuery({
+    queryKey: ['custom-vaults'],
+    queryFn: () => api.getCustomVaults(),
+    enabled: authenticated,
+  })
+  const customVaults = customVaultsRes?.data ?? []
+
   // Per-tier auto-TP lookup (pct 0..100) sourced from /portfolio/pnl.
   const autoTpByTier: Record<string, number> = {}
   for (const pt of (pnlData?.data?.tiers as any[]) ?? []) {
@@ -463,6 +471,64 @@ export default function DashboardPage() {
     if (depositing) return
     setDepositing(true)
     try {
+      // Personal vault deposit — separate flow (no Deposit row, just SOL transfer + rebalance)
+      if (depositMode === 'vault' && depositVaultId) {
+        setDepositStatus('Creating deposit intent…')
+        const intentRes = await api.depositCustomVault(depositVaultId, amount)
+        const destination = intentRes.data.subWalletAddress
+
+        setDepositStatus('Building transaction…')
+        const connection = new Connection(SOLANA_RPC_URL, 'confirmed')
+        const fromPubkey = new PublicKey(wallet.address)
+        const totalLamports = Math.round(amount * LAMPORTS_PER_SOL)
+
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed')
+        const tx = new Transaction({ feePayer: fromPubkey, blockhash, lastValidBlockHeight })
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey,
+            toPubkey: new PublicKey(destination),
+            lamports: totalLamports,
+          }),
+        )
+        const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false })
+
+        setDepositStatus('Waiting for wallet signature…')
+        const { signature: sigBytes } = await wallet.signAndSendTransaction({
+          transaction: new Uint8Array(serialized),
+          chain: 'solana:mainnet',
+        })
+        const txSignature =
+          typeof sigBytes === 'string'
+            ? sigBytes
+            : bs58.encode(sigBytes instanceof Uint8Array ? sigBytes : new Uint8Array(sigBytes as any))
+
+        setDepositStatus('Confirming on-chain…')
+        const deadline = Date.now() + 60_000
+        while (true) {
+          const { value } = await connection.getSignatureStatuses([txSignature])
+          const st = value[0]
+          if (st?.err) throw new Error('Transaction failed on-chain')
+          if (st?.confirmationStatus === 'confirmed' || st?.confirmationStatus === 'finalized') break
+          if (Date.now() > deadline) throw new Error('Timed out waiting for confirmation')
+          await new Promise((r) => setTimeout(r, 1500))
+        }
+
+        setDepositStatus('Confirming deposit & triggering rebalance…')
+        await api.confirmCustomVaultDeposit(depositVaultId, txSignature, amount)
+
+        setShowDeposit(false)
+        setDepositAmount('')
+        setDepositStatus(null)
+        setNotice({
+          kind: 'success',
+          title: 'Vault deposit confirmed',
+          message: 'SOL sent to your personal vault. Rebalance triggered — tokens will be purchased shortly.',
+        })
+        setDepositing(false)
+        return
+      }
+
       // Build the list of legs: one for single-tier, three for split.
       // Split into equal integer lamport chunks and dump the rounding
       // dust onto the last leg so the lamport totals match `amount`.
@@ -777,16 +843,19 @@ export default function DashboardPage() {
               <h2 className="font-[family-name:var(--font-display)] text-xl font-bold mb-4">
                 Deposit SOL
               </h2>
-              {/* Mode toggle: single tier vs. split across all three vaults. */}
+              {/* Mode toggle: single tier vs. split vs. personal vault. */}
               <div className="mb-4">
                 <label className="block text-sm text-[var(--color-text-muted)] mb-2">
                   Mode
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {(
                     [
                       { key: 'single', label: 'Single vault' },
                       { key: 'split', label: 'Split all 3' },
+                      ...(customVaults.length > 0
+                        ? [{ key: 'vault' as const, label: 'Personal' }]
+                        : []),
                     ] as const
                   ).map((m) => {
                     const active = depositMode === m.key
@@ -794,7 +863,7 @@ export default function DashboardPage() {
                       <button
                         key={m.key}
                         type="button"
-                        onClick={() => setDepositMode(m.key)}
+                        onClick={() => setDepositMode(m.key as any)}
                         className="rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
                         style={
                           active
@@ -829,6 +898,32 @@ export default function DashboardPage() {
                           }
                         >
                           {tier}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : depositMode === 'vault' ? (
+                <div className="mb-4">
+                  <label className="block text-sm text-[var(--color-text-muted)] mb-2">
+                    Vault
+                  </label>
+                  <div className="space-y-2">
+                    {customVaults.map((v: any) => {
+                      const active = depositVaultId === v.id
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => setDepositVaultId(v.id)}
+                          className="w-full rounded-lg border px-3 py-2 text-left text-xs font-semibold transition-colors"
+                          style={
+                            active
+                              ? { background: '#00D62B', color: '#000', borderColor: '#00D62B' }
+                              : { borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }
+                          }
+                        >
+                          Vault {v.id.slice(0, 6)} · {v.tokenMints.length} tokens
                         </button>
                       )
                     })}
