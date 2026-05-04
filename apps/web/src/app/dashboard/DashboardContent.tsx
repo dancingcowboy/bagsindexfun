@@ -23,6 +23,7 @@ import {
 // live alongside the reusable TierHoldingsCard so dashboard + vault never
 // drift visually.
 import { TierHoldingsCard, TIER_COLORS } from '@/components/TierHoldingsCard'
+import { PersonalVaults } from './PersonalVaults'
 const TIER_LIST = ['CONSERVATIVE', 'BALANCED', 'DEGEN'] as const
 import { BAGSX_MINT } from '@bags-index/shared'
 import { api } from '@/lib/api'
@@ -961,6 +962,9 @@ export default function DashboardPage() {
         >
           <NextCycleCountdown compact />
         </motion.div>
+
+        {/* Personal Vaults */}
+        <PersonalVaults />
 
         {/* Current Index */}
         <motion.div

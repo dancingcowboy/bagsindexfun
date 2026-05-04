@@ -14,6 +14,7 @@ import { projectRoutes } from './routes/projects.js'
 import { analysisRoutes } from './routes/analysis.js'
 import { solanaRpcRoutes } from './routes/solana-rpc.js'
 import { adminRoutes } from './routes/admin.js'
+import { customVaultRoutes } from './routes/custom-vaults.js'
 import { chatRoutes } from './routes/chat.js'
 import { userRoutes } from './routes/user.js'
 import { db } from '@bags-index/db'
@@ -159,6 +160,9 @@ await app.register(async (scoped) => {
   })
   await scoped.register(chatRoutes, { prefix: '/chat' })
 })
+
+// Custom vaults (user-facing)
+await app.register(customVaultRoutes, { prefix: '/custom-vaults' })
 
 // Admin routes
 await app.register(adminRoutes, { prefix: '/admin' })

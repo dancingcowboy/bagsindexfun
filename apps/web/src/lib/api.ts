@@ -291,6 +291,56 @@ class ApiClient {
     )
   }
 
+  // Custom Vaults (personal)
+  getCustomVaults() {
+    return this.fetch<{ data: any[] }>('/custom-vaults')
+  }
+
+  getCustomVault(id: string) {
+    return this.fetch<{ data: any }>(`/custom-vaults/${id}`)
+  }
+
+  createCustomVault(tokenMints: string[], rebalanceIntervalSec?: number) {
+    return this.fetch<{ data: { vault: any; subWallet: { id: string; address: string } } }>(
+      '/custom-vaults',
+      {
+        method: 'POST',
+        body: JSON.stringify({ tokenMints, rebalanceIntervalSec }),
+      },
+    )
+  }
+
+  updateCustomVault(id: string, body: { tokenMints?: string[]; rebalanceIntervalSec?: number }) {
+    return this.fetch<{ data: any }>(`/custom-vaults/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+  }
+
+  pauseCustomVault(id: string) {
+    return this.fetch<{ data: { status: string } }>(`/custom-vaults/${id}/pause`, {
+      method: 'POST',
+    })
+  }
+
+  resumeCustomVault(id: string) {
+    return this.fetch<{ data: { status: string } }>(`/custom-vaults/${id}/resume`, {
+      method: 'POST',
+    })
+  }
+
+  rebalanceCustomVault(id: string) {
+    return this.fetch<{ data: { queued: boolean } }>(`/custom-vaults/${id}/rebalance`, {
+      method: 'POST',
+    })
+  }
+
+  deleteCustomVault(id: string) {
+    return this.fetch<{ data: { deleted: boolean } }>(`/custom-vaults/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')
