@@ -472,7 +472,12 @@ export default function DashboardPage() {
     setDepositing(true)
     try {
       // Personal vault deposit — separate flow (no Deposit row, just SOL transfer + rebalance)
-      if (depositMode === 'vault' && depositVaultId) {
+      if (depositMode === 'vault') {
+        if (!depositVaultId) {
+          setNotice({ kind: 'error', title: 'No vault selected', message: 'Select a personal vault to deposit into.' })
+          setDepositing(false)
+          return
+        }
         setDepositStatus('Creating deposit intent…')
         const intentRes = await api.depositCustomVault(depositVaultId, amount)
         const destination = intentRes.data.subWalletAddress
@@ -863,7 +868,12 @@ export default function DashboardPage() {
                       <button
                         key={m.key}
                         type="button"
-                        onClick={() => setDepositMode(m.key as any)}
+                        onClick={() => {
+                          setDepositMode(m.key as any)
+                          if (m.key === 'vault' && customVaults.length > 0 && !depositVaultId) {
+                            setDepositVaultId(customVaults[0].id)
+                          }
+                        }}
                         className="rounded-lg border px-3 py-2 text-xs font-semibold transition-colors"
                         style={
                           active
