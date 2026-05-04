@@ -54,6 +54,29 @@ export async function customVaultRoutes(app: FastifyInstance) {
       }
     }
 
+    // Fallback to DexScreener for mints not in scoring DB (user-chosen tokens)
+    const missing = [...mints].filter((m) => !metaByMint.has(m))
+    if (missing.length > 0) {
+      try {
+        const res = await fetch(
+          `https://api.dexscreener.com/tokens/v1/solana/${missing.join(',')}`,
+          { signal: AbortSignal.timeout(10_000) },
+        )
+        const data: any = await res.json()
+        const pairs: any[] = Array.isArray(data) ? data : data?.pairs ?? []
+        for (const p of pairs) {
+          const mint = p?.baseToken?.address
+          if (!mint || metaByMint.has(mint)) continue
+          metaByMint.set(mint, {
+            symbol: p?.baseToken?.symbol ?? null,
+            marketCapUsd: Number(p?.marketCap) || Number(p?.fdv) || 0,
+          })
+        }
+      } catch {
+        // Non-critical — UI just shows raw mint address
+      }
+    }
+
     const serialized = vaults.map((v) => ({
       ...v,
       subWallet: v.subWallet
