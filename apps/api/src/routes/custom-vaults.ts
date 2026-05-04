@@ -35,7 +35,22 @@ export async function customVaultRoutes(app: FastifyInstance) {
       },
       orderBy: { createdAt: 'desc' },
     })
-    return { data: vaults }
+    const serialized = vaults.map((v) => ({
+      ...v,
+      subWallet: v.subWallet
+        ? {
+            ...v.subWallet,
+            holdings: v.subWallet.holdings.map((h) => ({
+              ...h,
+              amount: h.amount.toString(),
+              valueSolEst: Number(h.valueSolEst),
+              costBasisSol: Number(h.costBasisSol),
+              realizedPnlSol: Number(h.realizedPnlSol),
+            })),
+          }
+        : null,
+    }))
+    return { data: serialized }
   })
 
   /**
@@ -65,7 +80,24 @@ export async function customVaultRoutes(app: FastifyInstance) {
       },
     })
     if (!vault) return reply.status(404).send({ error: 'Not found' })
-    return { data: vault }
+    return {
+      data: {
+        ...vault,
+        subWallet: vault.subWallet
+          ? {
+              ...vault.subWallet,
+              holdings: vault.subWallet.holdings.map((h) => ({
+                ...h,
+                amount: h.amount.toString(),
+                valueSolEst: Number(h.valueSolEst),
+                costBasisSol: Number(h.costBasisSol),
+                realizedPnlSol: Number(h.realizedPnlSol),
+                totalSoldSol: Number(h.totalSoldSol),
+              })),
+            }
+          : null,
+      },
+    }
   })
 
   /**
