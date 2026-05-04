@@ -223,7 +223,8 @@ export function PersonalVaults() {
               const val = Number(h.valueSolEst || 0)
               return {
                 tokenMint: h.tokenMint,
-                tokenSymbol: null,
+                tokenSymbol: h.tokenSymbol ?? null,
+                marketCapUsd: h.marketCapUsd ?? 0,
                 amount: h.amount,
                 valueSol: val,
                 allocationPct: totalVal > 0 ? ((val / totalVal) * 100).toFixed(2) : '0',

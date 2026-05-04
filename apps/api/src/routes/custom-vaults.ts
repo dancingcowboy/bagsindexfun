@@ -35,18 +35,42 @@ export async function customVaultRoutes(app: FastifyInstance) {
       },
       orderBy: { createdAt: 'desc' },
     })
+    // Enrich holdings with token metadata (symbol, market cap) from latest scores
+    const mints = new Set<string>()
+    for (const v of vaults) {
+      for (const h of v.subWallet?.holdings ?? []) mints.add(h.tokenMint)
+    }
+    const scores = mints.size > 0
+      ? await db.tokenScore.findMany({
+          where: { tokenMint: { in: [...mints] }, source: 'BAGS' },
+          orderBy: { scoredAt: 'desc' },
+          select: { tokenMint: true, tokenSymbol: true, marketCapUsd: true },
+        })
+      : []
+    const metaByMint = new Map<string, { symbol: string | null; marketCapUsd: number }>()
+    for (const s of scores) {
+      if (!metaByMint.has(s.tokenMint)) {
+        metaByMint.set(s.tokenMint, { symbol: s.tokenSymbol, marketCapUsd: Number(s.marketCapUsd) })
+      }
+    }
+
     const serialized = vaults.map((v) => ({
       ...v,
       subWallet: v.subWallet
         ? {
             ...v.subWallet,
-            holdings: v.subWallet.holdings.map((h) => ({
-              ...h,
-              amount: h.amount.toString(),
-              valueSolEst: Number(h.valueSolEst),
-              costBasisSol: Number(h.costBasisSol),
-              realizedPnlSol: Number(h.realizedPnlSol),
-            })),
+            holdings: v.subWallet.holdings.map((h) => {
+              const meta = metaByMint.get(h.tokenMint)
+              return {
+                ...h,
+                amount: h.amount.toString(),
+                valueSolEst: Number(h.valueSolEst),
+                costBasisSol: Number(h.costBasisSol),
+                realizedPnlSol: Number(h.realizedPnlSol),
+                tokenSymbol: meta?.symbol ?? null,
+                marketCapUsd: meta?.marketCapUsd ?? 0,
+              }
+            }),
           }
         : null,
     }))
