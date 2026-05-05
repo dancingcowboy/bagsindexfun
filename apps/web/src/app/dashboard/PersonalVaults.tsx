@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usePrivy } from '@privy-io/react-auth'
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Plus, Trash2, Settings, Pause, Play } from 'lucide-react'
 import { TierHoldingsCard, TIER_COLORS } from '@/components/TierHoldingsCard'
@@ -29,7 +29,7 @@ export function PersonalVaults() {
   const [editingVault, setEditingVault] = useState<string | null>(null)
   const [mintInput, setMintInput] = useState('')
   const [intervalHours, setIntervalHours] = useState(2)
-  const [editMints, setEditMints] = useState<string[]>([])
+  const [editMintsRaw, setEditMintsRaw] = useState('')
   const [editInterval, setEditInterval] = useState(2)
   const [liquidatingKey, setLiquidatingKey] = useState<string | null>(null)
 
@@ -114,13 +114,14 @@ export function PersonalVaults() {
 
   function startEdit(vault: any) {
     setEditingVault(vault.id)
-    setEditMints(vault.tokenMints)
+    setEditMintsRaw(vault.tokenMints.join('\n'))
     setEditInterval(vault.rebalanceIntervalSec / 3600)
   }
 
   function handleUpdate(id: string) {
-    if (editMints.length === 0) return
-    updateMut.mutate({ id, tokenMints: editMints, rebalanceIntervalSec: editInterval * 3600 })
+    const mints = parseMints(editMintsRaw)
+    if (mints.length === 0) return
+    updateMut.mutate({ id, tokenMints: mints, rebalanceIntervalSec: editInterval * 3600 })
   }
 
   // Register the custom vault color so TierHoldingsCard can use it
@@ -305,8 +306,8 @@ export function PersonalVaults() {
                         Token Mints
                       </label>
                       <textarea
-                        value={editMints.join('\n')}
-                        onChange={(e) => setEditMints(parseMints(e.target.value))}
+                        value={editMintsRaw}
+                        onChange={(e) => setEditMintsRaw(e.target.value)}
                         rows={3}
                         className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-xs font-[family-name:var(--font-mono)]"
                       />
