@@ -149,7 +149,13 @@ async function processFeeClaim(_job: Job) {
     return
   }
 
-  const subWallets = vaultUser.subWallets
+  // Route all fees into CONSERVATIVE only — spreading across 3 tiers
+  // produces per-swap amounts too small to overcome on-chain overhead.
+  const subWallets = vaultUser.subWallets.filter((sw) => sw.riskTier === 'CONSERVATIVE')
+  if (subWallets.length === 0) {
+    logger.error('[fee-claim] No CONSERVATIVE sub-wallet found for protocol vault')
+    return
+  }
   const tierCount = subWallets.length
 
   // Read actual post-claim balance on the primary wallet. Fee claims
