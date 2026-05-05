@@ -230,10 +230,11 @@ export function PersonalVaults() {
                 allocationPct: totalVal > 0 ? ((val / totalVal) * 100).toFixed(2) : '0',
               }
             })
+            const nativeSol = Number(v.subWallet?.nativeSol ?? 0)
             const totalValue = holdings.reduce(
               (s: number, h: any) => s + Number(h.valueSol),
               0,
-            )
+            ) + nativeSol
             const isEditing = editingVault === v.id
             const autoTpPct = v.subWallet?.autoTakeProfitPct ?? 0
 
@@ -347,6 +348,7 @@ export function PersonalVaults() {
                         riskTier: 'PERSONAL',
                         walletAddress: v.subWallet?.address,
                         totalValueSol: totalValue,
+                        nativeSol,
                         holdings,
                       }}
                       forceReshuffle={{

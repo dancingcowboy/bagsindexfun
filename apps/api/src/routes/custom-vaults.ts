@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { db } from '@bags-index/db'
 import { CUSTOM_VAULT_MIN_INTERVAL_SEC, LAMPORTS_PER_SOL } from '@bags-index/shared'
-import { createSolanaServerWallet, hasConfirmedSystemTransfer } from '@bags-index/solana'
+import { createSolanaServerWallet, hasConfirmedSystemTransfer, getNativeSolBalance } from '@bags-index/solana'
 import { requireAuth } from '../middleware/auth.js'
 import { customVaultQueue } from '../queue/queues.js'
 
@@ -77,26 +77,43 @@ export async function customVaultRoutes(app: FastifyInstance) {
       }
     }
 
-    const serialized = vaults.map((v) => ({
-      ...v,
-      subWallet: v.subWallet
-        ? {
-            ...v.subWallet,
-            holdings: v.subWallet.holdings.map((h) => {
-              const meta = metaByMint.get(h.tokenMint)
-              return {
-                ...h,
-                amount: h.amount.toString(),
-                valueSolEst: Number(h.valueSolEst),
-                costBasisSol: Number(h.costBasisSol),
-                realizedPnlSol: Number(h.realizedPnlSol),
-                tokenSymbol: meta?.symbol ?? null,
-                marketCapUsd: meta?.marketCapUsd ?? 0,
-              }
-            }),
-          }
-        : null,
-    }))
+    const nativeSolByAddress = new Map<string, number>()
+    for (const v of vaults) {
+      if (v.subWallet?.address && v.subWallet.holdings.length > 0) {
+        try {
+          nativeSolByAddress.set(v.subWallet.address, await getNativeSolBalance(v.subWallet.address))
+        } catch {
+          nativeSolByAddress.set(v.subWallet.address, 0)
+        }
+      }
+    }
+
+    const serialized = vaults.map((v) => {
+      const nativeSol = v.subWallet?.holdings.length
+        ? (nativeSolByAddress.get(v.subWallet.address) ?? 0)
+        : 0
+      return {
+        ...v,
+        subWallet: v.subWallet
+          ? {
+              ...v.subWallet,
+              nativeSol,
+              holdings: v.subWallet.holdings.map((h) => {
+                const meta = metaByMint.get(h.tokenMint)
+                return {
+                  ...h,
+                  amount: h.amount.toString(),
+                  valueSolEst: Number(h.valueSolEst),
+                  costBasisSol: Number(h.costBasisSol),
+                  realizedPnlSol: Number(h.realizedPnlSol),
+                  tokenSymbol: meta?.symbol ?? null,
+                  marketCapUsd: meta?.marketCapUsd ?? 0,
+                }
+              }),
+            }
+          : null,
+      }
+    })
     return { data: serialized }
   })
 
