@@ -9,11 +9,14 @@ const TIER_COLORS: Record<string, { chip: string; text: string; border: string }
   CONSERVATIVE: { chip: '#0ea5e9', text: '#7dd3fc', border: 'rgba(56, 189, 248, 0.35)' },
   BALANCED: { chip: '#a855f7', text: '#c084fc', border: 'rgba(168, 85, 247, 0.35)' },
   DEGEN: { chip: '#ec4899', text: '#f9a8d4', border: 'rgba(244, 114, 182, 0.35)' },
+  PERSONAL: { chip: '#f59e0b', text: '#fbbf24', border: 'rgba(251, 191, 36, 0.35)' },
 }
 
 interface TierInfo {
   riskTier: string
   currentValueSol: string | number
+  vaultId?: string
+  label?: string
 }
 
 interface Props {
@@ -44,19 +47,30 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
     const out: typeof results = []
 
     for (const t of tierList) {
-      const pct = getPct(t.riskTier)
-      setStatus(`Withdrawing ${pct}% from ${t.riskTier}...`)
+      const pct = getPct(t.riskTier + (t.vaultId ?? ''))
+      const displayName = t.label ?? t.riskTier
+      setStatus(`Withdrawing ${pct}% from ${displayName}...`)
       try {
-        const res = await api.createWithdrawal(t.riskTier, pct)
-        out.push({
-          tier: t.riskTier,
-          ok: true,
-          msg: `~${Number(res.data.netSol).toFixed(4)} SOL queued`,
-          id: res.data.id,
-        })
+        if (t.vaultId) {
+          const res = await api.withdrawCustomVault(t.vaultId, pct)
+          out.push({
+            tier: displayName,
+            ok: true,
+            msg: `~${Number(res.data.estimatedSol).toFixed(4)} SOL queued`,
+            id: res.data.id,
+          })
+        } else {
+          const res = await api.createWithdrawal(t.riskTier, pct)
+          out.push({
+            tier: displayName,
+            ok: true,
+            msg: `~${Number(res.data.netSol).toFixed(4)} SOL queued`,
+            id: res.data.id,
+          })
+        }
       } catch (err: any) {
         out.push({
-          tier: t.riskTier,
+          tier: displayName,
           ok: false,
           msg: err?.message ?? 'Failed',
         })
@@ -81,9 +95,8 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
   }
 
   const handleWithdrawAll = () => {
-    // Override all pcts to 100 for withdraw-all
     const full: Record<string, number> = {}
-    for (const t of activeTiers) full[t.riskTier] = 100
+    for (const t of activeTiers) full[t.riskTier + (t.vaultId ?? '')] = 100
     setPcts(full)
     handleWithdraw(activeTiers)
   }
@@ -121,13 +134,14 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
           ) : (
             <div className="space-y-4 mb-5">
               {activeTiers.map((t) => {
+                const key = t.riskTier + (t.vaultId ?? '')
                 const c = TIER_COLORS[t.riskTier] ?? TIER_COLORS.BALANCED
                 const val = Number(t.currentValueSol)
-                const pct = getPct(t.riskTier)
+                const pct = getPct(key)
                 const estSol = (val * pct) / 100
                 return (
                   <div
-                    key={t.riskTier}
+                    key={key}
                     className="rounded-xl border p-4"
                     style={{ borderColor: c.border }}
                   >
@@ -137,7 +151,7 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
                           className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
                           style={{ background: c.chip, color: '#0a0a0a' }}
                         >
-                          {t.riskTier}
+                          {t.label ?? t.riskTier}
                         </span>
                         <span className="text-xs text-[var(--color-text-muted)]">
                           {val.toFixed(4)} SOL
@@ -155,13 +169,12 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
                         </span>
                       </div>
                     </div>
-                    {/* Percentage slider */}
                     <input
                       type="range"
                       min={0}
                       max={100}
                       value={pct}
-                      onChange={(e) => setPct(t.riskTier, Number(e.target.value))}
+                      onChange={(e) => setPct(key, Number(e.target.value))}
                       disabled={busy}
                       className="w-full h-1.5 rounded-full appearance-none cursor-pointer disabled:opacity-40"
                       style={{
@@ -175,7 +188,7 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
                           key={q}
                           type="button"
                           disabled={busy}
-                          onClick={() => setPct(t.riskTier, q)}
+                          onClick={() => setPct(key, q)}
                           className="rounded border px-2 py-0.5 text-[10px] font-bold transition-colors disabled:opacity-30"
                           style={
                             pct === q
@@ -218,7 +231,7 @@ export function WithdrawalModal({ open, onClose, tiers, onWithdrawn, onProgress 
             <div className="flex gap-3">
               <button
                 onClick={() =>
-                  handleWithdraw(activeTiers.filter((t) => getPct(t.riskTier) > 0))
+                  handleWithdraw(activeTiers.filter((t) => getPct(t.riskTier + (t.vaultId ?? '')) > 0))
                 }
                 disabled={busy || activeTiers.length === 0}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50"

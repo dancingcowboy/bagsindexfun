@@ -407,15 +407,93 @@ export async function customVaultRoutes(app: FastifyInstance) {
   )
 
   /**
+   * POST /custom-vaults/:id/withdraw — liquidate all holdings + send SOL back
+   * Body: { pct?: number } (1–100, default 100)
+   */
+  app.post<{ Params: { id: string }; Body: { pct?: number } }>(
+    '/:id/withdraw',
+    async (req, reply) => {
+      try {
+        const userId = req.authUser!.userId
+        const withdrawPct = req.body?.pct ?? 100
+        if (withdrawPct < 1 || withdrawPct > 100) {
+          return reply.status(400).send({ error: 'pct must be 1–100' })
+        }
+        const vault = await db.customVault.findFirst({
+          where: { id: req.params.id, subWallet: { userId } },
+          include: { subWallet: { include: { holdings: true } } },
+        })
+        if (!vault) return reply.status(404).send({ error: 'Not found' })
+        if (!vault.subWallet || vault.subWallet.holdings.length === 0) {
+          return reply.status(400).send({ error: 'No holdings to withdraw' })
+        }
+
+        const inflight = await db.withdrawal.findFirst({
+          where: { userId, riskTier: 'DEGEN', status: 'PENDING' },
+        })
+        if (inflight) {
+          const age = Date.now() - new Date(inflight.createdAt).getTime()
+          if (age > 10 * 60 * 1000) {
+            await db.withdrawal.update({
+              where: { id: inflight.id },
+              data: { status: 'PARTIAL', confirmedAt: new Date() },
+            })
+          } else {
+            return reply.status(409).send({ error: 'Withdrawal already in progress' })
+          }
+        }
+
+        const totalValueSol = vault.subWallet.holdings.reduce(
+          (sum, h) => sum + Number(h.valueSolEst), 0,
+        )
+
+        const withdrawal = await db.withdrawal.create({
+          data: {
+            userId,
+            riskTier: 'DEGEN',
+            amountSol: totalValueSol * (withdrawPct / 100),
+            feeSol: 0,
+            status: 'PENDING',
+          },
+        })
+
+        const { withdrawalQueue } = await import('../queue/queues.js')
+        await withdrawalQueue.add('liquidate', {
+          withdrawalId: withdrawal.id,
+          userId,
+          subWalletId: vault.subWalletId,
+          pct: withdrawPct,
+        })
+
+        return {
+          data: {
+            id: withdrawal.id,
+            status: 'PENDING',
+            estimatedSol: (totalValueSol * withdrawPct / 100).toFixed(9),
+          },
+        }
+      } catch (err) {
+        app.log.error(err, 'Failed to withdraw from custom vault')
+        return reply.status(500).send({ error: 'Internal server error' })
+      }
+    },
+  )
+
+  /**
    * DELETE /custom-vaults/:id — remove vault + scheduler
-   * Holdings remain in the sub-wallet until user withdraws.
+   * Blocked while holdings have value.
    */
   app.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     const userId = req.authUser!.userId
     const vault = await db.customVault.findFirst({
       where: { id: req.params.id, subWallet: { userId } },
+      include: { subWallet: { select: { holdings: { where: { amount: { gt: 0 } } } } } },
     })
     if (!vault) return reply.status(404).send({ error: 'Not found' })
+
+    if (vault.subWallet && vault.subWallet.holdings.length > 0) {
+      return reply.status(400).send({ error: 'Withdraw all funds before deleting this vault' })
+    }
 
     await customVaultQueue.removeJobScheduler(`custom-vault-${vault.id}`)
     await db.customVault.delete({ where: { id: vault.id } })

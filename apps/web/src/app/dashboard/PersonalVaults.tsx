@@ -32,6 +32,7 @@ export function PersonalVaults() {
   const [editMintsRaw, setEditMintsRaw] = useState('')
   const [editInterval, setEditInterval] = useState(2)
   const [liquidatingKey, setLiquidatingKey] = useState<string | null>(null)
+  const [sellResult, setSellResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const { data: vaultsRes, isLoading, isError } = useQuery({
     queryKey: ['custom-vaults'],
@@ -98,11 +99,16 @@ export function PersonalVaults() {
 
   async function handleLiquidateHolding(mint: string, vaultId: string) {
     setLiquidatingKey(`PERSONAL:${mint}`)
+    setSellResult(null)
     try {
       await api.liquidateCustomVaultHolding(vaultId, mint)
       queryClient.invalidateQueries({ queryKey: ['custom-vaults'] })
+      setSellResult({ ok: true, msg: 'Sell queued — SOL will return to your wallet shortly.' })
+    } catch (err: any) {
+      setSellResult({ ok: false, msg: err?.message ?? 'Sell failed' })
     } finally {
       setLiquidatingKey(null)
+      setTimeout(() => setSellResult(null), 5000)
     }
   }
 
@@ -201,6 +207,12 @@ export function PersonalVaults() {
           {createMut.isError && (
             <p className="text-xs text-red-400">{(createMut.error as Error).message}</p>
           )}
+        </div>
+      )}
+
+      {sellResult && (
+        <div className={`mb-3 rounded-lg px-4 py-2.5 text-xs font-medium ${sellResult.ok ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' : 'bg-red-500/10 text-red-400'}`}>
+          {sellResult.msg}
         </div>
       )}
 

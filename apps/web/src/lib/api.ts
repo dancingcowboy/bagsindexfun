@@ -369,6 +369,13 @@ class ApiClient {
     )
   }
 
+  withdrawCustomVault(vaultId: string, pct: number = 100) {
+    return this.fetch<{ data: { id: string; status: string; estimatedSol: string } }>(
+      `/custom-vaults/${vaultId}/withdraw`,
+      { method: 'POST', body: JSON.stringify({ pct }) },
+    )
+  }
+
   // Analysis (public)
   getLatestAnalysis() {
     return this.fetch<{ data: any }>('/analysis/latest')

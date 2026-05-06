@@ -1197,10 +1197,23 @@ export default function DashboardPage() {
       <WithdrawalModal
         open={showWithdraw}
         onClose={() => setShowWithdraw(false)}
-        tiers={(pnlData?.data?.tiers ?? []).map((t: any) => ({
-          riskTier: t.riskTier,
-          currentValueSol: t.currentValueSol ?? '0',
-        }))}
+        tiers={[
+          ...(pnlData?.data?.tiers ?? []).map((t: any) => ({
+            riskTier: t.riskTier,
+            currentValueSol: t.currentValueSol ?? '0',
+          })),
+          ...(customVaults ?? []).map((v: any) => {
+            const total = (v.subWallet?.holdings ?? []).reduce(
+              (s: number, h: any) => s + Number(h.valueSolEst || 0), 0,
+            ) + Number(v.subWallet?.nativeSol ?? 0)
+            return {
+              riskTier: 'PERSONAL',
+              currentValueSol: total,
+              vaultId: v.id,
+              label: `Vault ${v.id.slice(0, 6)}`,
+            }
+          }),
+        ]}
         onWithdrawn={() => {
           setShowWithdraw(false)
           refetchPortfolio()
